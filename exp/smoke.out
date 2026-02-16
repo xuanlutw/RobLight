@@ -1,0 +1,744 @@
+[general robustness for sum GNN on Cora with budgets 5]
+========== configuration ==========
+gnn_path:      ./data/models/Cora_sum.gnnx
+graph_path:    ./data/graph/Cora/0.graph
+feature_path:  ./data/graph/Cora/0.feat
+budgets (g/l): 5/5
+objective:     3 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000725
+#nodes: 19
+#cuts:  10
+#leafs: 9
+ratio:  0.00:0.00:1.00
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_sum.gnnx
+graph_path:    ./data/graph/Cora/1.graph
+feature_path:  ./data/graph/Cora/1.feat
+budgets (g/l): 5/5
+objective:     6 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000606
+#nodes: 2
+#cuts:  0
+#leafs: 0
+ratio:  0.33:0.00:0.67
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_sum.gnnx
+graph_path:    ./data/graph/Cora/2.graph
+feature_path:  ./data/graph/Cora/2.feat
+budgets (g/l): 5/5
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.001294
+#nodes: 5
+#cuts:  0
+#leafs: 0
+ratio:  0.33:0.00:0.67
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_sum.gnnx
+graph_path:    ./data/graph/Cora/3.graph
+feature_path:  ./data/graph/Cora/3.feat
+budgets (g/l): 5/5
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000501
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  0.50:0.00:0.50
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_sum.gnnx
+graph_path:    ./data/graph/Cora/4.graph
+feature_path:  ./data/graph/Cora/4.feat
+budgets (g/l): 5/5
+objective:     4 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000514
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  0.50:0.00:0.50
+
+[general robustness for max GNN on Cora with budgets 5]
+========== configuration ==========
+gnn_path:      ./data/models/Cora_max.gnnx
+graph_path:    ./data/graph/Cora/0.graph
+feature_path:  ./data/graph/Cora/0.feat
+budgets (g/l): 5/5
+objective:     3 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.001237
+#nodes: 21
+#cuts:  11
+#leafs: 11
+ratio:  0.25:0.25:0.50
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_max.gnnx
+graph_path:    ./data/graph/Cora/1.graph
+feature_path:  ./data/graph/Cora/1.feat
+budgets (g/l): 5/5
+objective:     6 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000672
+#nodes: 2
+#cuts:  0
+#leafs: 0
+ratio:  1.00:0.00:0.00
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_max.gnnx
+graph_path:    ./data/graph/Cora/2.graph
+feature_path:  ./data/graph/Cora/2.feat
+budgets (g/l): 5/5
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.789473
+#nodes: 19157
+#cuts:  9579
+#leafs: 5745
+ratio:  0.25:0.00:0.75
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_max.gnnx
+graph_path:    ./data/graph/Cora/3.graph
+feature_path:  ./data/graph/Cora/3.feat
+budgets (g/l): 5/5
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000446
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  -nan:-nan:-nan
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_max.gnnx
+graph_path:    ./data/graph/Cora/4.graph
+feature_path:  ./data/graph/Cora/4.feat
+budgets (g/l): 5/5
+objective:     4 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000439
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  0.00:0.00:1.00
+
+[general robustness for mean GNN on Cora with budgets 5]
+========== configuration ==========
+gnn_path:      ./data/models/Cora_mean.gnnx
+graph_path:    ./data/graph/Cora/0.graph
+feature_path:  ./data/graph/Cora/0.feat
+budgets (g/l): 5/5
+objective:     3 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000595
+#nodes: 3
+#cuts:  0
+#leafs: 0
+ratio:  0.33:0.00:0.67
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_mean.gnnx
+graph_path:    ./data/graph/Cora/1.graph
+feature_path:  ./data/graph/Cora/1.feat
+budgets (g/l): 5/5
+objective:     6 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000626
+#nodes: 2
+#cuts:  0
+#leafs: 0
+ratio:  0.50:0.00:0.50
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_mean.gnnx
+graph_path:    ./data/graph/Cora/2.graph
+feature_path:  ./data/graph/Cora/2.feat
+budgets (g/l): 5/5
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.108495
+#nodes: 13071
+#cuts:  6536
+#leafs: 3617
+ratio:  0.00:0.33:0.67
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_mean.gnnx
+graph_path:    ./data/graph/Cora/3.graph
+feature_path:  ./data/graph/Cora/3.feat
+budgets (g/l): 5/5
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000431
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  0.00:0.00:1.00
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_mean.gnnx
+graph_path:    ./data/graph/Cora/4.graph
+feature_path:  ./data/graph/Cora/4.feat
+budgets (g/l): 5/5
+objective:     4 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000483
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  0.50:0.00:0.50
+
+[general robustness for sum GNN on MUTAG with budgets 1]
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_sum.gnnx
+graph_path:    ./data/graph/MUTAG/0.graph
+feature_path:  ./data/graph/MUTAG/0.feat
+budgets (g/l): 1/1
+objective:     1 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.001018
+#nodes: 10
+#cuts:  4
+#leafs: 4
+ratio:  0.14:0.14:0.71
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_sum.gnnx
+graph_path:    ./data/graph/MUTAG/1.graph
+feature_path:  ./data/graph/MUTAG/1.feat
+budgets (g/l): 1/1
+objective:     0 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000523
+#nodes: 4
+#cuts:  1
+#leafs: 1
+ratio:  0.00:0.00:1.00
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_sum.gnnx
+graph_path:    ./data/graph/MUTAG/2.graph
+feature_path:  ./data/graph/MUTAG/2.feat
+budgets (g/l): 1/1
+objective:     0 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000526
+#nodes: 4
+#cuts:  1
+#leafs: 1
+ratio:  0.17:0.17:0.67
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_sum.gnnx
+graph_path:    ./data/graph/MUTAG/3.graph
+feature_path:  ./data/graph/MUTAG/3.feat
+budgets (g/l): 1/1
+objective:     1 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: ROBUST
+time:   0.020651
+#nodes: 341
+#cuts:  171
+#leafs: 170
+ratio:  0.00:0.00:1.00
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_sum.gnnx
+graph_path:    ./data/graph/MUTAG/4.graph
+feature_path:  ./data/graph/MUTAG/4.feat
+budgets (g/l): 1/1
+objective:     0 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000305
+#nodes: 4
+#cuts:  1
+#leafs: 1
+ratio:  0.00:0.00:1.00
+
+[general robustness for max GNN on MUTAG with budgets 1]
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_max.gnnx
+graph_path:    ./data/graph/MUTAG/0.graph
+feature_path:  ./data/graph/MUTAG/0.feat
+budgets (g/l): 1/1
+objective:     1 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.004313
+#nodes: 112
+#cuts:  55
+#leafs: 55
+ratio:  0.00:0.00:1.00
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_max.gnnx
+graph_path:    ./data/graph/MUTAG/1.graph
+feature_path:  ./data/graph/MUTAG/1.feat
+budgets (g/l): 1/1
+objective:     0 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.001575
+#nodes: 54
+#cuts:  26
+#leafs: 26
+ratio:  0.00:0.00:1.00
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_max.gnnx
+graph_path:    ./data/graph/MUTAG/2.graph
+feature_path:  ./data/graph/MUTAG/2.feat
+budgets (g/l): 1/1
+objective:     0 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.001262
+#nodes: 36
+#cuts:  17
+#leafs: 17
+ratio:  0.20:0.00:0.80
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_max.gnnx
+graph_path:    ./data/graph/MUTAG/3.graph
+feature_path:  ./data/graph/MUTAG/3.feat
+budgets (g/l): 1/1
+objective:     1 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.003240
+#nodes: 122
+#cuts:  60
+#leafs: 60
+ratio:  0.14:0.14:0.71
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_max.gnnx
+graph_path:    ./data/graph/MUTAG/4.graph
+feature_path:  ./data/graph/MUTAG/4.feat
+budgets (g/l): 1/1
+objective:     0 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.002125
+#nodes: 70
+#cuts:  34
+#leafs: 34
+ratio:  0.25:0.00:0.75
+
+[general robustness for mean GNN on MUTAG with budgets 1]
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_mean.gnnx
+graph_path:    ./data/graph/MUTAG/0.graph
+feature_path:  ./data/graph/MUTAG/0.feat
+budgets (g/l): 1/1
+objective:     1 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: ROBUST
+time:   0.012868
+#nodes: 273
+#cuts:  137
+#leafs: 137
+ratio:  0.25:0.00:0.75
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_mean.gnnx
+graph_path:    ./data/graph/MUTAG/1.graph
+feature_path:  ./data/graph/MUTAG/1.feat
+budgets (g/l): 1/1
+objective:     0 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.003710
+#nodes: 88
+#cuts:  43
+#leafs: 43
+ratio:  0.14:0.14:0.71
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_mean.gnnx
+graph_path:    ./data/graph/MUTAG/2.graph
+feature_path:  ./data/graph/MUTAG/2.feat
+budgets (g/l): 1/1
+objective:     0 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.003302
+#nodes: 54
+#cuts:  26
+#leafs: 26
+ratio:  0.11:0.11:0.78
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_mean.gnnx
+graph_path:    ./data/graph/MUTAG/3.graph
+feature_path:  ./data/graph/MUTAG/3.feat
+budgets (g/l): 1/1
+objective:     1 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: ROBUST
+time:   0.014769
+#nodes: 343
+#cuts:  172
+#leafs: 172
+ratio:  0.00:0.20:0.80
+
+========== configuration ==========
+gnn_path:      ./data/models/MUTAG_mean.gnnx
+graph_path:    ./data/graph/MUTAG/4.graph
+feature_path:  ./data/graph/MUTAG/4.feat
+budgets (g/l): 1/1
+objective:     0 > other
+perturbation:  DELETION AND INSERTION
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000539
+#nodes: 10
+#cuts:  4
+#leafs: 4
+ratio:  0.33:0.00:0.67
+
+[radius computation for sum GNN on Cora]
+========== configuration ==========
+gnn_path:      ./data/models/Cora_sum.gnnx
+graph_path:    ./data/graph/Cora/0.graph
+feature_path:  ./data/graph/Cora/0.feat
+radius computation
+objective:     3 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000560
+#nodes: 19
+#cuts:  10
+#leafs: 9
+ratio:  0.00:0.00:1.00
+radius: 0
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_sum.gnnx
+graph_path:    ./data/graph/Cora/1.graph
+feature_path:  ./data/graph/Cora/1.feat
+radius computation
+objective:     6 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000705
+#nodes: 7
+#cuts:  3
+#leafs: 2
+ratio:  0.00:0.33:0.67
+radius: 0
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_sum.gnnx
+graph_path:    ./data/graph/Cora/2.graph
+feature_path:  ./data/graph/Cora/2.feat
+radius computation
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.432551
+#nodes: 20743
+#cuts:  10370
+#leafs: 7240
+ratio:  0.17:0.00:0.83
+radius: 3
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_sum.gnnx
+graph_path:    ./data/graph/Cora/3.graph
+feature_path:  ./data/graph/Cora/3.feat
+radius computation
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000411
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  1.00:0.00:0.00
+radius: 0
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_sum.gnnx
+graph_path:    ./data/graph/Cora/4.graph
+feature_path:  ./data/graph/Cora/4.feat
+radius computation
+objective:     4 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000431
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  1.00:0.00:0.00
+radius: 0
+
+[radius computation for max GNN on Cora]
+========== configuration ==========
+gnn_path:      ./data/models/Cora_max.gnnx
+graph_path:    ./data/graph/Cora/0.graph
+feature_path:  ./data/graph/Cora/0.feat
+radius computation
+objective:     3 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000891
+#nodes: 21
+#cuts:  11
+#leafs: 11
+ratio:  0.25:0.25:0.50
+radius: 0
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_max.gnnx
+graph_path:    ./data/graph/Cora/1.graph
+feature_path:  ./data/graph/Cora/1.feat
+radius computation
+objective:     6 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000975
+#nodes: 7
+#cuts:  3
+#leafs: 2
+ratio:  0.67:0.00:0.33
+radius: 0
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_max.gnnx
+graph_path:    ./data/graph/Cora/2.graph
+feature_path:  ./data/graph/Cora/2.feat
+radius computation
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   8.237720
+#nodes: 111169
+#cuts:  55585
+#leafs: 2169
+ratio:  0.14:0.73:0.14
+radius: 0
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_max.gnnx
+graph_path:    ./data/graph/Cora/3.graph
+feature_path:  ./data/graph/Cora/3.feat
+radius computation
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000482
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  1.00:0.00:0.00
+radius: 0
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_max.gnnx
+graph_path:    ./data/graph/Cora/4.graph
+feature_path:  ./data/graph/Cora/4.feat
+radius computation
+objective:     4 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000509
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  1.00:0.00:0.00
+radius: 0
+
+[radius computation for mean GNN on Cora]
+========== configuration ==========
+gnn_path:      ./data/models/Cora_mean.gnnx
+graph_path:    ./data/graph/Cora/0.graph
+feature_path:  ./data/graph/Cora/0.feat
+radius computation
+objective:     3 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000757
+#nodes: 21
+#cuts:  9
+#leafs: 9
+ratio:  0.33:0.00:0.67
+radius: 1
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_mean.gnnx
+graph_path:    ./data/graph/Cora/1.graph
+feature_path:  ./data/graph/Cora/1.feat
+radius computation
+objective:     6 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: NONROBUST
+time:   0.000721
+#nodes: 7
+#cuts:  3
+#leafs: 2
+ratio:  0.25:0.25:0.50
+radius: 0
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_mean.gnnx
+graph_path:    ./data/graph/Cora/2.graph
+feature_path:  ./data/graph/Cora/2.feat
+radius computation
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.970171
+#nodes: 93043
+#cuts:  46522
+#leafs: 997
+ratio:  0.18:0.73:0.09
+radius: 0
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_mean.gnnx
+graph_path:    ./data/graph/Cora/3.graph
+feature_path:  ./data/graph/Cora/3.feat
+radius computation
+objective:     1 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000464
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  -nan:-nan:-nan
+radius: 0
+
+========== configuration ==========
+gnn_path:      ./data/models/Cora_mean.gnnx
+graph_path:    ./data/graph/Cora/4.graph
+feature_path:  ./data/graph/Cora/4.feat
+radius computation
+objective:     4 > other
+perturbation:  DELETION ONLY
+variant:       
+============== status =============
+result: ROBUST
+time:   0.000494
+#nodes: 1
+#cuts:  1
+#leafs: 1
+ratio:  -nan:-nan:-nan
+radius: 0
+
