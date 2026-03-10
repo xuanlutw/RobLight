@@ -1,167 +1,235 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include "BArray.h"
 #include "Common.h"
 #include "Graph.h"
 #include "utils.h"
 
 // --------------------------------- liftcycle ---------------------------------
-Graph *Graph_alloc(Common *common) {
-    Graph *self = XMALLOC(sizeof(Graph));
-    assert(self != NULL);
+void HGraph_init(HGraph *self) {
+    self->list = XMALLOC(N_VERTICES * N_VERTICES * sizeof(uint16_t));
+    self->pos  = XMALLOC(N_VERTICES * N_VERTICES * sizeof(uint16_t));
+    self->edge = XMALLOC(N_VERTICES * N_VERTICES * sizeof(edge_t));
 
-    self->common = common;
+    self->poffset = XMALLOC(N_VERTICES * sizeof(uint16_t));
+    self->noffset = XMALLOC(N_VERTICES * sizeof(uint16_t));
+    self->qoffset = XMALLOC(N_VERTICES * sizeof(uint16_t));
+    self->xoffset = XMALLOC(N_VERTICES * sizeof(uint16_t));
 
-    if (IS_DIRECTED) {
-        self->iadj = XMALLOC(N_VERTICES * sizeof(BArray *));
-        self->oadj = XMALLOC(N_VERTICES * sizeof(BArray *));
-        ITER_VTXS(v) {
-            self->iadj[v] = BArray_alloc(N_VERTICES);
-            self->oadj[v] = BArray_alloc(N_VERTICES);
+    self->pmin = XMALLOC(N_VERTICES * sizeof(uint16_t));
+    self->qmin = XMALLOC(N_VERTICES * sizeof(uint16_t));
+
+    self->gnbr_list = XMALLOC(N_VERTICES * sizeof(uint16_t));
+    self->gnbr_lens = XMALLOC(N_LAYERS * sizeof(uint16_t));
+    self->gnbr_dist = XMALLOC(N_VERTICES * sizeof(uint8_t));
+
+    self->anbr_list = XMALLOC(N_VERTICES * sizeof(uint16_t));
+    self->anbr_lens = XMALLOC(N_LAYERS * sizeof(uint16_t));
+    self->anbr_dist = XMALLOC(N_VERTICES * sizeof(uint8_t));
+
+    ITER_VTXS(v) {
+        ITER_VTXS(u) {
+            self->edge[v * N_VERTICES + u] = XEDGE;
+        }
+        self->poffset[v] = N_VERTICES * v;
+        self->noffset[v] = N_VERTICES * v;
+        self->qoffset[v] = N_VERTICES * v;
+        self->xoffset[v] = N_VERTICES * v;
+    }
+
+    memset(self->pmin, -1, N_VERTICES * sizeof(uint16_t));
+    memset(self->qmin, -1, N_VERTICES * sizeof(uint16_t));
+}
+
+void HGraph_init_copy(HGraph *self, HGraph *H) {
+    HGraph_init(self);
+
+    memcpy(self->list, H->list, N_VERTICES * N_VERTICES * sizeof(uint16_t));
+    memcpy(self->pos, H->pos, N_VERTICES * N_VERTICES * sizeof(uint16_t));
+    memcpy(self->edge, H->edge, N_VERTICES * N_VERTICES * sizeof(edge_t));
+
+    memcpy(self->poffset, H->poffset, N_VERTICES * sizeof(uint16_t));
+    memcpy(self->noffset, H->noffset, N_VERTICES * sizeof(uint16_t));
+    memcpy(self->qoffset, H->qoffset, N_VERTICES * sizeof(uint16_t));
+    memcpy(self->xoffset, H->xoffset, N_VERTICES * sizeof(uint16_t));
+
+    memcpy(self->pmin, H->pmin, N_VERTICES * sizeof(uint16_t));
+    memcpy(self->qmin, H->qmin, N_VERTICES * sizeof(uint16_t));
+}
+
+void HGraph_init_copy_trans(HGraph *self, HGraph *H) {
+    HGraph_init(self);
+
+    // set pedges
+    ITER_VTXS(v) {
+        ITER_VTXS(u) {
+            if (HGraph_edge(H, u, v) == PEDGE)
+                HGraph_set_pedge(self, v, u);
         }
     }
-    if (IS_UNDIRECTED) {
-        self->iadj = XMALLOC(N_VERTICES * sizeof(BArray *));
-        self->oadj = self->iadj;
-        ITER_VTXS(v) {
-            self->iadj[v] = BArray_alloc(N_VERTICES);
+
+    // set qedges
+    ITER_VTXS(v) {
+        ITER_VTXS(u) {
+            if (HGraph_edge(H, u, v) == QEDGE)
+                HGraph_set_qedge(self, v, u);
         }
     }
+}
 
-    self->kadj = XMALLOC(N_LAYERS_EXT * sizeof(BArray *));
-    ITER_LAYERS_EXT(k) {
-        self->kadj[k] = BArray_alloc(N_VERTICES);
-    }
-    BArray_set(self->kadj[0], 0);  // set 0-hop neighbors
+void HGraph_alias(HGraph *self, HGraph *H) {
+    self->list = H->list;
+    self->pos  = H->pos;
+    self->edge = H->edge;
+
+    self->poffset = H->poffset;
+    self->noffset = H->noffset;
+    self->qoffset = H->qoffset;
+    self->xoffset = H->xoffset;
+
+    self->pmin = H->pmin;
+    self->qmin = H->qmin;
+}
+
+HGraph *HGraph_alloc() {
+    HGraph *self = XMALLOC(sizeof(HGraph));
+
+    HGraph_init(self);
 
     return self;
 }
 
-Graph *Graph_alloc_fp(Common *common, FILE *fp) {
-    Graph *self = Graph_alloc(common);
+HGraph *HGraph_alloc_fp(FILE *fp) {
+    HGraph *self = HGraph_alloc();
 
     ITER_VTXS(v) {
         size_t deg, u;
         fscanf(fp, "%lu", &deg);
         for (size_t i = 0; i < deg; ++i) {
             fscanf(fp, "%lu", &u);
-            Graph_set_edge(self, v, u);
+            HGraph_set_pedge(self, v, u);
         }
-        assert(deg == Graph_ideg(self, v));
+        assert(deg == HGraph_pdeg(self, v));
     }
 
     return self;
 }
 
-void Graph_free(Graph *self) {
-    if (IS_DIRECTED) {
-        ITER_VTXS(v) {
-            BArray_free(self->iadj[v]);
-            BArray_free(self->oadj[v]);
+void HGraph_fill(HGraph *self) {
+    ITER_VTXS(v) {
+        ITER_VTXS(u) {
+            if (v == u)
+                continue;
+            if (HGraph_edge(self, v, u) == XEDGE)
+                HGraph_set_qedge(self, v, u);
         }
-        free(self->iadj);
-        free(self->oadj);
     }
-    if (IS_UNDIRECTED) {
-        ITER_VTXS(v) {
-            BArray_free(self->iadj[v]);
-        }
-        free(self->iadj);
-    }
+}
 
-    ITER_LAYERS_EXT(k) {
-        BArray_free(self->kadj[k]);
-    }
-    free(self->kadj);
+void HGraph_cleanup(HGraph *self) {
+    free(self->list);
+    free(self->pos);
+    free(self->edge);
+
+    free(self->poffset);
+    free(self->noffset);
+    free(self->qoffset);
+    free(self->xoffset);
+
+    free(self->pmin);
+    free(self->qmin);
+
+    free(self->gnbr_list);
+    free(self->gnbr_lens);
+    free(self->gnbr_dist);
+
+    free(self->anbr_list);
+    free(self->anbr_lens);
+    free(self->anbr_dist);
+}
+
+void HGraph_free(HGraph *self) {
+    HGraph_cleanup(self);
 
     free(self);
 }
 
-void Graph_dump(Graph *self, bool with_knbr) {
-    printf("  ");
-    ITER_VTXS(u) {
-        printf("%2ld", u);
-    }
-    printf("\n");
+// ------------------------- k-hop grounding neighbors -------------------------
+void HGraph_update_gnbr(HGraph *self) {
+    uint16_t *queue = self->gnbr_list;
+    uint16_t *end   = self->gnbr_list + 1;
+    uint16_t *lens  = self->gnbr_lens;
 
-    ITER_VTXS(v) {
-        printf("%2ld", v);
-        ITER_VTXS(u) {
-            printf(" %c", Graph_is_edge(self, v, u) ? '+' : ' ');
-        }
-        printf("%2ld\n", Graph_ideg(self, v));
-    }
+    uint8_t *dist = self->gnbr_dist;
+    memset(dist, -1, N_VERTICES * sizeof(uint8_t));
 
-    printf("  ");
-    ITER_VTXS(u) {
-        printf("%2ld", Graph_odeg(self, u));
-    }
-    printf("\n");
+    dist[0]         = 0;
+    queue[0]        = 0;
+    lens[0]         = 1;
+    size_t len_all  = 1;
+    size_t len_prev = 1;
 
-    if (with_knbr) {
-        Graph_update_knbr(self);
-        ITER_LAYERS_EXT(k) {
-            printf("%2ld", k);
-            ITER_VTXS(u) {
-                printf(" %c", Graph_is_knbr(self, k, u) ? '+' : ' ');
-            }
-            printf("%2ld", Graph_n_knbr(self, k));
-            printf("\n");
-        }
-    }
-}
+    for (size_t l = 1; l < N_LAYERS; ++l) {
+        size_t len = 0;
 
-void Graph_copy(Graph *self, Graph *G) {
-    if (IS_DIRECTED) {
-        ITER_VTXS(v) {
-            BArray_copy(self->iadj[v], G->iadj[v]);
-            BArray_copy(self->oadj[v], G->oadj[v]);
-        }
-    }
-    if (IS_UNDIRECTED) {
-        ITER_VTXS(v) {
-            BArray_copy(self->iadj[v], G->iadj[v]);
-        }
-    }
-}
+        for (size_t i = 0; i < len_prev; ++i, ++queue) {
+            size_t v = *queue;
 
-// ----------------------------- basic operations ------------------------------
-size_t Graph_count_edges(Graph *self) {
-    size_t counter = 0;
-
-    ITER_VTXS(v) {
-        ITER_VTXS(u) {
-            if (IS_UNDIRECTED && (u > v))
-                break;
-            if (Graph_is_edge(self, v, u))
-                counter++;
-        }
-    }
-
-    return counter;
-}
-
-// ------------------------- k-hop incoming neighbors --------------------------
-void Graph_update_knbr(Graph *self) {
-    ITER_LAYERS_EXT(k) {
-        if (k == 0) {
-            continue;
-        }
-        else if (k == 1) {
-            BArray_copy(self->kadj[1], self->iadj[0]);
-            BArray_set(self->kadj[1], 0);
-        }
-        else {
-            BArray_copy(self->kadj[k], self->kadj[k - 1]);
-            ITER_BArray(self->kadj[k - 1], v) {
-                if (BArray_test(self->kadj[k - 2], v))
+            ITER_GNBRS(self, v, u) {
+                if (dist[u] < 0xFF)
                     continue;
-                BArray_union(self->kadj[k], self->iadj[v]);
+                dist[u] = l;
+                *end    = u;
+                ++end;
+                ++len;
             }
         }
+
+        len_all += len;
+        len_prev = len;
+
+        lens[l] = len_all;
+    }
+}
+
+void HGraph_update_anbr(HGraph *self) {
+    uint16_t *queue = self->anbr_list;
+    uint16_t *end   = self->anbr_list + 1;
+    uint16_t *lens  = self->anbr_lens;
+
+    uint8_t *dist = self->anbr_dist;
+    memset(dist, -1, N_VERTICES * sizeof(uint8_t));
+
+    dist[0]         = 0;
+    queue[0]        = 0;
+    lens[0]         = 1;
+    size_t len_all  = 1;
+    size_t len_prev = 1;
+
+    for (size_t l = 1; l < N_LAYERS; ++l) {
+        size_t len = 0;
+
+        for (size_t i = 0; i < len_prev; ++i, ++queue) {
+            size_t v = *queue;
+
+            ITER_ANBRS(self, v, u) {
+                if (dist[u] < 0xFF)
+                    continue;
+                dist[u] = l;
+                *end    = u;
+                ++end;
+                ++len;
+            }
+        }
+
+        len_all += len;
+        len_prev = len;
+
+        lens[l] = len_all;
     }
 }

@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// -----------------------------------------------------------------------------
+#define ALIGNMENT 64 // fit cache line
+
 // ---------------------------------- macros -----------------------------------
 #define MAX(x, y) \
     (((x) >= (y)) ? (x) : (y))
@@ -16,6 +19,11 @@
 
 #define PAD(x, n) \
     (((x) + ((n)-1)) & ~((n)-1))
+
+#define ITER_UINT16_LIST(list, len, x)                                 \
+    if ((len) > 0)                                                     \
+        for (uint16_t x, *x##ptr = (list), *x##end = (x##ptr + (len)); \
+            (x##ptr != x##end) && (x = *x##ptr, 1); ++(x##ptr))
 
 #define CHECK_AT(cond, file, line, fmt, ...)               \
     do {                                                   \
@@ -30,8 +38,9 @@
     CHECK_AT(cond, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
 
 static inline void *xmalloc(size_t bytes, const char *file, int line) {
-    void *ptr = malloc(bytes);
-    CHECK_AT(ptr == NULL, file, line, "malloc failed!");
+    size_t pad_bytes = PAD(bytes, ALIGNMENT);
+    void  *ptr       = aligned_alloc(ALIGNMENT, pad_bytes);
+    CHECK_AT(ptr == NULL, file, line, "aligned_alloc failed!");
 
     return ptr;
 }

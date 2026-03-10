@@ -145,12 +145,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--gbudget", type=int, default=1,
-        help=("Global budget (ignored if --compute-radius is set). "
+        help=("Global budget (ignored if --comp-radius is set). "
               "Default: 1.")
     )
     parser.add_argument(
         "--lbudget", type=int,
-        help=("Local budget (ignored if --compute-radius is set). "
+        help=("Local budget (ignored if --comp-radius is set). "
               "Default: same as global budget.")
     )
     parser.add_argument(

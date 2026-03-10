@@ -2,15 +2,16 @@
 #include <float.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
-#include "BArray.h"
 #include "BManager.h"
 #include "Common.h"
+#include "GManager.h"
 #include "Matrix.h"
-#include "PGraph.h"
 #include "Stack.h"
 #include "utils.h"
 
@@ -18,100 +19,150 @@
 typedef struct {
     Node node;
 
-    size_t l;
-    size_t v;
+    bool ready;
 
-    bool push_self;
-    bool push_nbrs;
+    uint16_t **index;
+    uint16_t  *counter_self;
+    uint16_t  *counter_nbrs;
 
-    VEC *lb_v;
-    VEC *ub_v;
-    VEC *lb_self_v;
-    VEC *ub_self_v;
-    VEC *lb_nbrs_v;
-    VEC *ub_nbrs_v;
-    VEC *lb_rxcA_v;
-    VEC *ub_rxcA_v;
+    MAT *lb;
+    MAT *ub;
+    MAT *lb_self;
+    MAT *ub_self;
+    MAT *lb_nbrs;
+    MAT *ub_nbrs;
+    MAT *lb_rxcA;
+    MAT *ub_rxcA;
+
+    VEC ub_pool;
 } BManagerSnap;
-
-typedef struct {
-    Node node;
-
-    VEC *ub_pool;
-} BManagerPoolSnap;
 
 static void BManager_snap_free(Node *node) {
     BManagerSnap *snap = (BManagerSnap *)node;
 
-    if (((Node *)snap)->type > 0) {
-        VEC_free(snap->lb_v);
-        VEC_free(snap->ub_v);
-        VEC_free(snap->lb_self_v);
-        VEC_free(snap->ub_self_v);
-        VEC_free(snap->lb_nbrs_v);
-        VEC_free(snap->ub_nbrs_v);
-        if (snap->lb_rxcA_v != NULL) {
-            VEC_free(snap->lb_rxcA_v);
-            VEC_free(snap->ub_rxcA_v);
-        }
+    ITER_LAYERS(l) {
+        free(snap->index[l]);
+
+        MAT_free(snap->lb[l]);
+        MAT_free(snap->ub[l]);
+        MAT_free(snap->lb_nbrs[l]);
+        MAT_free(snap->ub_nbrs[l]);
+        MAT_free(snap->lb_self[l]);
+        MAT_free(snap->ub_self[l]);
+        MAT_free(snap->lb_rxcA[l]);
+        MAT_free(snap->ub_rxcA[l]);
     }
+    VEC_free(snap->ub_pool);
 
-    free(snap);
-}
+    free(snap->index);
+    free(snap->counter_self);
+    free(snap->counter_nbrs);
 
-static void BManager_poolsnap_free(Node *node) {
-    BManagerPoolSnap *snap = (BManagerPoolSnap *)node;
+    free(snap->lb);
+    free(snap->ub);
+    free(snap->lb_self);
+    free(snap->ub_self);
+    free(snap->lb_nbrs);
+    free(snap->ub_nbrs);
+    free(snap->lb_rxcA);
+    free(snap->ub_rxcA);
 
-    if (snap->ub_pool != NULL)
-        VEC_free(snap->ub_pool);
-
-    free(snap);
+    free(node);
 }
 
 // ----------------------------------- type ------------------------------------
 struct BManager {
-    Common *common;
-    PGraph *G;
+    GManager *gm;
 
-    MAT **lb;
-    MAT **ub;
-    MAT **lb_self;
-    MAT **ub_self;
-    MAT **lb_nbrs;
-    MAT **ub_nbrs;
-    MAT **lb_rxcA;
-    MAT **ub_rxcA;
-    VEC **tmp_lb_self;
-    VEC **tmp_ub_self;
-    VEC **tmp_lb_nbrs;
-    VEC **tmp_ub_nbrs;
-    VEC  *ub_pool;
+    MAT *lb;
+    MAT *ub;
+    MAT *lb_self;
+    MAT *ub_self;
+    MAT *lb_nbrs;
+    MAT *ub_nbrs;
+    MAT *lb_rxcA;
+    MAT *ub_rxcA;
+    MAT *lb_tmp;
+    MAT *ub_tmp;
+    VEC  ub_pool;
 
-    VEC **tmp_vec1;
-    VEC **tmp_vec2;
+    MAT *mtmp1;
+    MAT *mtmp2;
+    VEC *vtmp1;
+    VEC *vtmp2;
 
-    double *tmp;
+    double **transpose;
 
-    BArray *dirty_self;
-    BArray *dirty_self_next;
-    BArray *dirty_nbrs;
-    BArray *dirty_nbrs_next;
+    Stack         stack;
+    BManagerSnap *snap;
 
-    Stack *stack;
-    Stack *stack_pool;
-
-    bool init;
+    bool flush;
 
     bool    profiling;
     clock_t clock;
 };
 
 // --------------------------------- lifecycle ---------------------------------
-BManager *BManager_alloc(Common *common, PGraph *G) {
+BManager *BManager_alloc(GManager *gm) {
     BManager *self = XMALLOC(sizeof(BManager));
 
-    self->common = common;
-    self->G      = G;
+    self->gm = gm;
+
+    // allocate
+    self->lb      = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+    self->ub      = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+    self->lb_self = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+    self->ub_self = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+    self->lb_nbrs = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+    self->ub_nbrs = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+    self->lb_rxcA = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+    self->ub_rxcA = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+    self->lb_tmp  = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+    self->ub_tmp  = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+    self->vtmp1   = XMALLOC(N_LAYERS_EXT * sizeof(VEC *));
+    self->vtmp2   = XMALLOC(N_LAYERS_EXT * sizeof(VEC *));
+    self->mtmp1   = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+    self->mtmp2   = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+
+    ITER_LAYERS(l) {
+        self->lb[l]      = MAT_alloc(N_VERTICES, DIM[l]);
+        self->ub[l]      = MAT_alloc(N_VERTICES, DIM[l]);
+        self->lb_nbrs[l] = MAT_alloc(N_VERTICES, DIM[l]);
+        self->ub_nbrs[l] = MAT_alloc(N_VERTICES, DIM[l]);
+        if (l == 1)
+            continue;
+        self->lb_self[l] = MAT_alloc(N_VERTICES, DIM[l]);
+        self->ub_self[l] = MAT_alloc(N_VERTICES, DIM[l]);
+        self->lb_rxcA[l] = MAT_alloc(N_VERTICES, DIM[l]);
+        self->ub_rxcA[l] = MAT_alloc(N_VERTICES, DIM[l]);
+    }
+    ITER_LAYERS_EXT(l) {
+        self->lb_tmp[l] = MAT_alloc(N_VERTICES, DIM[l]);
+        self->ub_tmp[l] = MAT_alloc(N_VERTICES, DIM[l]);
+
+        self->vtmp1[l] = VEC_alloc(DIM[l]);
+        self->vtmp2[l] = VEC_alloc(DIM[l]);
+        self->mtmp1[l] = MAT_alloc(N_VERTICES, DIM[l]);
+        self->mtmp2[l] = MAT_alloc(N_VERTICES, DIM[l]);
+    }
+    self->ub_pool = VEC_alloc(DIM_LAST);
+
+    self->transpose = XMALLOC(DIM_MAX * sizeof(double *));
+    for (size_t i = 0; i < DIM_MAX; ++i)
+        self->transpose[i] = XMALLOC(N_VERTICES * sizeof(double));
+
+    Stack_init(&self->stack, sizeof(BManagerSnap));
+
+    self->clock = 0;
+
+    // init
+    self->flush      = true;
+    self->lb[0]      = INPUT_FEAT;
+    self->ub[0]      = INPUT_FEAT;
+    self->lb_self[1] = INPUT_FEAT_RXCC_CB;
+    self->ub_self[1] = INPUT_FEAT_RXCC_CB;
+    self->lb_rxcA[1] = INPUT_FEAT_RXCA;
+    self->ub_rxcA[1] = INPUT_FEAT_RXCA;
 
     return self;
 }
@@ -120,22 +171,23 @@ void BManager_free(BManager *self) {
     ITER_LAYERS(l) {
         MAT_free(self->lb[l]);
         MAT_free(self->ub[l]);
-        MAT_free(self->lb_self[l]);
-        MAT_free(self->ub_self[l]);
         MAT_free(self->lb_nbrs[l]);
         MAT_free(self->ub_nbrs[l]);
         if (l == 1)
             continue;
+        MAT_free(self->lb_self[l]);
+        MAT_free(self->ub_self[l]);
         MAT_free(self->lb_rxcA[l]);
         MAT_free(self->ub_rxcA[l]);
     }
     ITER_LAYERS_EXT(l) {
-        VEC_free(self->tmp_lb_self[l]);
-        VEC_free(self->tmp_ub_self[l]);
-        VEC_free(self->tmp_lb_nbrs[l]);
-        VEC_free(self->tmp_ub_nbrs[l]);
-        VEC_free(self->tmp_vec1[l]);
-        VEC_free(self->tmp_vec2[l]);
+        MAT_free(self->lb_tmp[l]);
+        MAT_free(self->ub_tmp[l]);
+
+        MAT_free(self->mtmp1[l]);
+        MAT_free(self->mtmp2[l]);
+        VEC_free(self->vtmp1[l]);
+        VEC_free(self->vtmp2[l]);
     }
     VEC_free(self->ub_pool);
 
@@ -147,32 +199,27 @@ void BManager_free(BManager *self) {
     free(self->ub_nbrs);
     free(self->lb_rxcA);
     free(self->ub_rxcA);
-    free(self->tmp_lb_self);
-    free(self->tmp_ub_self);
-    free(self->tmp_lb_nbrs);
-    free(self->tmp_ub_nbrs);
-    free(self->tmp_vec1);
-    free(self->tmp_vec2);
+    free(self->lb_tmp);
+    free(self->ub_tmp);
+    free(self->mtmp1);
+    free(self->mtmp2);
+    free(self->vtmp1);
+    free(self->vtmp2);
 
-    free(self->tmp);
+    for (size_t i = 0; i < DIM_MAX; ++i)
+        free(self->transpose[i]);
+    free(self->transpose);
 
-    BArray_free(self->dirty_self);
-    BArray_free(self->dirty_self_next);
-    BArray_free(self->dirty_nbrs);
-    BArray_free(self->dirty_nbrs_next);
-
-    Stack_free(self->stack);
-    Stack_free(self->stack_pool);
+    Stack_cleanup(&self->stack, BManager_snap_free);
 
     free(self);
 }
-
 // ---------------------------------- getter -----------------------------------
-MAT *BManager_lb(BManager *self, size_t l) {
+MAT BManager_lb(BManager *self, size_t l) {
     return self->lb[l];
 }
 
-MAT *BManager_ub(BManager *self, size_t l) {
+MAT BManager_ub(BManager *self, size_t l) {
     return self->ub[l];
 }
 
@@ -186,1002 +233,1022 @@ clock_t BManager_clock(BManager *self) {
 }
 
 // ----------------------------------- snaps -----------------------------------
-static void BManager_push_snap(BManager *self, size_t l, size_t v,
-                               bool push_self, bool push_nbrs) {
-    BManagerSnap *snap = (BManagerSnap *)Stack_push(self->stack, l);
+static void BManager_swap_snap(BManager *self, BManagerSnap *snap) {
+    uint16_t **index        = snap->index;
+    uint16_t  *counter_self = snap->counter_self;
+    uint16_t  *counter_nbrs = snap->counter_nbrs;
 
-    if (Stack_fresh(self->stack)) {
-        snap->lb_v      = VEC_alloc(DIM[l]);
-        snap->ub_v      = VEC_alloc(DIM[l]);
-        snap->lb_self_v = VEC_alloc(DIM[l]);
-        snap->ub_self_v = VEC_alloc(DIM[l]);
-        snap->lb_nbrs_v = VEC_alloc(DIM[l]);
-        snap->ub_nbrs_v = VEC_alloc(DIM[l]);
+    ITER_LAYERS(l) {
+        uint16_t *index_l        = index[IS_NODE_CLASS ? l : 1];
+        uint16_t  counter_self_l = counter_self[l];
+        uint16_t  counter_nbrs_l = counter_nbrs[l];
+
+        MAT lb_self      = self->lb_self[l];
+        MAT ub_self      = self->ub_self[l];
+        MAT lb_self_snap = snap->lb_self[l];
+        MAT ub_self_snap = snap->ub_self[l];
+
+        MAT lb_nbrs      = self->lb_nbrs[l];
+        MAT ub_nbrs      = self->ub_nbrs[l];
+        MAT lb_nbrs_snap = snap->lb_nbrs[l];
+        MAT ub_nbrs_snap = snap->ub_nbrs[l];
+
+        MAT lb      = self->lb[l];
+        MAT ub      = self->ub[l];
+        MAT lb_snap = snap->lb[l];
+        MAT ub_snap = snap->ub[l];
+
+        MAT lb_rxcA      = self->lb_rxcA[l + 1];
+        MAT ub_rxcA      = self->ub_rxcA[l + 1];
+        MAT lb_rxcA_snap = snap->lb_rxcA[l + 1];
+        MAT ub_rxcA_snap = snap->ub_rxcA[l + 1];
+
+        for (size_t i = 0; i < counter_self_l; ++i) {
+            size_t v = index_l[i];
+
+            VEC lb_self_tmp = lb_self[v];
+            VEC ub_self_tmp = ub_self[v];
+
+            lb_self[v] = lb_self_snap[i];
+            ub_self[v] = ub_self_snap[i];
+
+            lb_self_snap[i] = lb_self_tmp;
+            ub_self_snap[i] = ub_self_tmp;
+        }
+        for (size_t i = 0; i < counter_nbrs_l; ++i) {
+            size_t v = index_l[i];
+
+            VEC lb_nbrs_tmp = lb_nbrs[v];
+            VEC ub_nbrs_tmp = ub_nbrs[v];
+            VEC lb_tmp      = lb[v];
+            VEC ub_tmp      = ub[v];
+
+            lb_nbrs[v] = lb_nbrs_snap[i];
+            ub_nbrs[v] = ub_nbrs_snap[i];
+            lb[v]      = lb_snap[i];
+            ub[v]      = ub_snap[i];
+
+            lb_nbrs_snap[i] = lb_nbrs_tmp;
+            ub_nbrs_snap[i] = ub_nbrs_tmp;
+            lb_snap[i]      = lb_tmp;
+            ub_snap[i]      = ub_tmp;
+        }
         if (NOT_LAST_LAYER(l)) {
-            snap->lb_rxcA_v = VEC_alloc(DIM[l + 1]);
-            snap->ub_rxcA_v = VEC_alloc(DIM[l + 1]);
-        }
-        else {
-            snap->lb_rxcA_v = NULL;
-            snap->ub_rxcA_v = NULL;
-        }
-    }
+            for (size_t i = 0; i < counter_nbrs_l; ++i) {
+                size_t v = index_l[i];
 
-    snap->l         = l;
-    snap->v         = v;
-    snap->push_self = push_self;
-    snap->push_nbrs = push_nbrs;
-    MV_SWAP(snap->lb_v, self->lb[l], v);
-    MV_SWAP(snap->ub_v, self->ub[l], v);
-    if (push_self) {
-        MV_SWAP(snap->lb_self_v, self->lb_self[l], v);
-        MV_SWAP(snap->ub_self_v, self->ub_self[l], v);
-    }
-    if (push_nbrs) {
-        MV_SWAP(snap->lb_nbrs_v, self->lb_nbrs[l], v);
-        MV_SWAP(snap->ub_nbrs_v, self->ub_nbrs[l], v);
-    }
-    if (NOT_LAST_LAYER(l)) {
-        MV_SWAP(snap->lb_rxcA_v, self->lb_rxcA[l + 1], v);
-        MV_SWAP(snap->ub_rxcA_v, self->ub_rxcA[l + 1], v);
+                VEC lb_rxcA_tmp = lb_rxcA[v];
+                VEC ub_rxcA_tmp = ub_rxcA[v];
+
+                lb_rxcA[v] = lb_rxcA_snap[i];
+                ub_rxcA[v] = ub_rxcA_snap[i];
+
+                lb_rxcA_snap[i] = lb_rxcA_tmp;
+                ub_rxcA_snap[i] = ub_rxcA_tmp;
+            }
+        }
     }
 }
 
+static void BManager_push_snap(BManager *self) {
+    BManagerSnap *snap = self->snap;
+    snap->ready        = true;
+
+    // pool
+    if (IS_GRAPH_CLASS) {
+        VEC_copy(snap->ub_pool, self->ub_pool);
+
+        uint16_t *index_l        = snap->index[IS_NODE_CLASS ? N_LAYERS : 1];
+        uint16_t  counter_nbrs_l = snap->counter_nbrs[N_LAYERS];
+        for (size_t i = 0; i < counter_nbrs_l; ++i) {
+            size_t v = index_l[i];
+            VV_sub(self->ub_pool, self->ub_pool, self->ub[N_LAYERS][v]);
+        }
+    }
+
+    BManager_swap_snap(self, snap);
+}
+
+static void BManager_pop_snap(BManager *self) {
+    BManagerSnap *snap = (BManagerSnap *)Stack_pop(&self->stack);
+    if (!snap->ready)
+        return;
+
+    // pool
+    if (IS_GRAPH_CLASS)
+        VV_SWAP(self->ub_pool, snap->ub_pool);
+
+    BManager_swap_snap(self, snap);
+}
+
+// --------------------------------- transpose ---------------------------------
+static size_t BManager_transpose_signed(BManager *self, MAT feat, size_t v) {
+    if (IS_DEL_ONLY) {
+        ITER_MAT2(feat, i) {
+            double *ptr = self->transpose[i];
+            ITER_PINBRS(self->gm, v, u) {
+                *ptr = -feat[u][i];
+                ++ptr;
+            }
+        }
+
+        return GManager_pideg(self->gm, v);
+    }
+    else {
+        assert(IS_DEL_INS);
+        ITER_MAT2(feat, i) {
+            double *ptr = self->transpose[i];
+            ITER_PINBRS(self->gm, v, u) {
+                *ptr = -feat[u][i];
+                ++ptr;
+            }
+            ITER_QINBRS(self->gm, v, u) {
+                *ptr = feat[u][i];
+                ++ptr;
+            }
+        }
+
+        return GManager_pideg(self->gm, v) + GManager_qideg(self->gm, v);
+    }
+
+    return 0;
+}
+
+static size_t BManager_transpose_unsigned_p(BManager *self, MAT feat,
+                                            size_t v) {
+    ITER_MAT2(feat, i) {
+        double *ptr = self->transpose[i];
+        ITER_PINBRS(self->gm, v, u) {
+            *ptr = feat[u][i];
+            ++ptr;
+        }
+    }
+
+    return GManager_pideg(self->gm, v);
+}
+
+static size_t BManager_transpose_unsigned(BManager *self, MAT feat, size_t v) {
+    if (IS_DEL_ONLY) {
+        ITER_MAT2(feat, i) {
+            double *ptr = self->transpose[i];
+            ITER_PINBRS(self->gm, v, u) {
+                *ptr = feat[u][i];
+                ++ptr;
+            }
+        }
+
+        return GManager_pideg(self->gm, v);
+    }
+    else {
+        assert(IS_DEL_INS);
+        ITER_MAT2(feat, i) {
+            double *ptr = self->transpose[i];
+            ITER_PINBRS(self->gm, v, u) {
+                *ptr = -feat[u][i];
+                ++ptr;
+            }
+            ITER_QINBRS(self->gm, v, u) {
+                *ptr = feat[u][i];
+                ++ptr;
+            }
+        }
+
+        return GManager_pideg(self->gm, v) + GManager_qideg(self->gm, v);
+    }
+
+    return 0;
+}
+
 // ------------------------------ comp bounds sum ------------------------------
-static void BManager_comp_nbrs_sum_fst(BManager *self, size_t v) {
-    VEC *lb_nbrs_v, *ub_nbrs_v, *tmp1, *tmp2;
-    MAT *feat_p;
+static void BManager_nbrs_sum_fst(BManager *self, size_t v) {
+    VEC lb_nbrs_v, ub_nbrs_v, tmp1, tmp2;
+    MAT feat_p;
     if (USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[1];
-        ub_nbrs_v = self->tmp_ub_nbrs[1];
+        lb_nbrs_v = self->lb_nbrs[1][v];
+        ub_nbrs_v = self->ub_nbrs[1][v];
         feat_p    = INPUT_FEAT_RXCA;
-        tmp1      = self->tmp_vec1[1];
-        tmp2      = self->tmp_vec2[1];
+        tmp1      = self->vtmp1[1];
+        tmp2      = self->vtmp2[1];
     }
-    if (!USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[0];
-        ub_nbrs_v = self->tmp_ub_nbrs[0];
+    else {
+        lb_nbrs_v = self->lb_tmp[0][v];
+        ub_nbrs_v = self->ub_tmp[0][v];
         feat_p    = INPUT_FEAT;
-        tmp1      = self->tmp_vec1[0];
-        tmp2      = self->tmp_vec2[0];
+        tmp1      = self->vtmp1[0];
+        tmp2      = self->vtmp2[0];
     }
+
+    uint16_t *plist   = GManager_pilist(self->gm, v);
+    uint16_t *qlist   = GManager_qilist(self->gm, v);
+    uint16_t *nlist   = GManager_nilist(self->gm, v);
+    size_t    pdeg    = GManager_pideg(self->gm, v);
+    size_t    qdeg    = GManager_qideg(self->gm, v);
+    size_t    ndeg    = GManager_nideg(self->gm, v);
+    size_t    lbudget = GManager_lbudget(self->gm, v);
 
     // for the input feat, lb = ub
     // normal
-    MV_acc(lb_nbrs_v, NULL, feat_p, PGraph_niadj(self->G, v));
+    MV_acc(lb_nbrs_v, NULL, feat_p, nlist, ndeg);
     VEC_copy(ub_nbrs_v, lb_nbrs_v);
 
     // potential
-    size_t pideg   = PGraph_pideg(self->G, v);
-    size_t qideg   = IS_DEL_INS ? PGraph_qideg(self->G, v) : 0;
-    size_t lbudget = PGraph_lbudget(self->G, v);
-    // do nothing
-    if (pideg + qideg == 0) {
+    if (pdeg + qdeg == 0) {  // do nothing
     }
-    // sum max/min of all
-    else if (lbudget >= pideg + qideg) {
-        MV_acc_neg(lb_nbrs_v, lb_nbrs_v, feat_p, PGraph_piadj(self->G, v));
-        MV_acc_pos(ub_nbrs_v, ub_nbrs_v, feat_p, PGraph_piadj(self->G, v));
+    else if (lbudget >= pdeg + qdeg) {  // sum max/min of all
+        MV_acc_neg(lb_nbrs_v, lb_nbrs_v, feat_p, plist, pdeg);
+        MV_acc_pos(ub_nbrs_v, ub_nbrs_v, feat_p, plist, pdeg);
         if (IS_DEL_INS) {
-            MV_acc_neg(lb_nbrs_v, lb_nbrs_v, feat_p, PGraph_qiadj(self->G, v));
-            MV_acc_pos(ub_nbrs_v, ub_nbrs_v, feat_p, PGraph_qiadj(self->G, v));
+            MV_acc_neg(lb_nbrs_v, lb_nbrs_v, feat_p, qlist, qdeg);
+            MV_acc_pos(ub_nbrs_v, ub_nbrs_v, feat_p, qlist, qdeg);
         }
     }
-    // sum
-    else if (lbudget == 0) {
-        MV_acc(lb_nbrs_v, lb_nbrs_v, feat_p, PGraph_piadj(self->G, v));
+    else if (lbudget == 0) {  // sum
+        MV_acc(lb_nbrs_v, lb_nbrs_v, feat_p, plist, pdeg);
         VEC_copy(ub_nbrs_v, lb_nbrs_v);
     }
-    // sum except the max/min of the min/max element
-    else if ((lbudget == 1) && (qideg == 0)) {
-        VEC *vmax = tmp1;
-        VEC *vmin = tmp2;
+    else if ((lbudget == 1) && (qdeg == 0)) {
+        // sum except the max/min of the min/max element
+        VEC vmax = tmp1;
+        VEC vmin = tmp2;
 
-        MV_trinity(lb_nbrs_v, vmax, vmin, feat_p, PGraph_piadj(self->G, v));
+        MV_trinity(lb_nbrs_v, vmax, vmin, feat_p, plist, pdeg);
         VEC_copy(ub_nbrs_v, lb_nbrs_v);
         VV_sub_pos(lb_nbrs_v, vmax);
         VV_sub_neg(ub_nbrs_v, vmin);
     }
-    // sum except the max/min of the top/last two elements
-    else if ((lbudget == 2) && (qideg == 0)) {
-        MV_acc(lb_nbrs_v, lb_nbrs_v, feat_p, PGraph_piadj(self->G, v));
+    else if ((lbudget == 2) && (qdeg == 0)) {
+        // sum except the max/min of the top/last two elements
+        MV_acc(lb_nbrs_v, lb_nbrs_v, feat_p, plist, pdeg);
         VEC_copy(ub_nbrs_v, lb_nbrs_v);
 
-        MV_max2(tmp1, tmp2, feat_p, PGraph_piadj(self->G, v));
+        MV_max2(tmp1, tmp2, feat_p, plist, pdeg);
         VV_sub_pos(lb_nbrs_v, tmp1);
         VV_sub_pos(lb_nbrs_v, tmp2);
 
-        MV_min2(tmp1, tmp2, feat_p, PGraph_piadj(self->G, v));
+        MV_min2(tmp1, tmp2, feat_p, plist, pdeg);
         VV_sub_neg(ub_nbrs_v, tmp1);
         VV_sub_neg(ub_nbrs_v, tmp2);
     }
-    // general case, sort and sum
-    else {
-        MV_acc(lb_nbrs_v, lb_nbrs_v, feat_p, PGraph_piadj(self->G, v));
+    else {  // general case, sort and sum
+        MV_acc(lb_nbrs_v, lb_nbrs_v, feat_p, plist, pdeg);
         VEC_copy(ub_nbrs_v, lb_nbrs_v);
-        ITER_VEC(lb_nbrs_v, i) {
-            size_t counter = 0;
-            size_t j;
-            ITER_PINBRS(self->G, v, u) {
-                self->tmp[counter] = -MVAL(feat_p, u, i);
-                ++counter;
-            }
-            if (IS_DEL_INS) {
-                ITER_QINBRS(self->G, v, u) {
-                    self->tmp[counter] = MVAL(feat_p, u, i);
-                    ++counter;
-                }
-            }
 
-            // lb
-            qselect(self->tmp, counter, lbudget);
-            for (j = 0; j < lbudget; ++j) {
-                double val = self->tmp[j];
-                VVAL(lb_nbrs_v, i) += MIN(val, 0.);
-            }
+        size_t counter = BManager_transpose_signed(self, feat_p, v);
 
-            // ub
-            qselect(self->tmp, counter, counter - lbudget);
-            for (j = 0; j < lbudget; ++j) {
-                double val = self->tmp[counter - lbudget + j];
-                VVAL(ub_nbrs_v, i) += MAX(val, 0.);
-            }
+        ITER_VEC(lb_nbrs_v, i) {  // lb
+            double *ptr = self->transpose[i];
+            qselect(ptr, counter, lbudget);
+            for (size_t j = 0; j < lbudget; ++j)
+                lb_nbrs_v[i] += MIN(ptr[j], 0.);
+        }
+
+        ITER_VEC(ub_nbrs_v, i) {  // ub
+            double *ptr = self->transpose[i];
+            qselect(ptr, counter, counter - lbudget);
+            for (size_t j = 0; j < lbudget; ++j)
+                ub_nbrs_v[i] += MAX(ptr[counter - lbudget + j], 0.);
         }
     }
-
-    if (!USE_REORDER_COMP)
-        MV_relax(self->tmp_lb_nbrs[1], self->tmp_ub_nbrs[1], CA[1], CA_ABS[1],
-                 lb_nbrs_v, ub_nbrs_v, self->tmp_vec1[0], self->tmp_vec2[0]);
 }
 
-static void BManager_comp_nbrs_sum_tail(BManager *self, size_t l, size_t v) {
-    VEC *lb_nbrs_v, *ub_nbrs_v, *tmp1, *tmp2;
-    MAT *lb_p, *ub_p;
+static void BManager_nbrs_sum_tail(BManager *self, size_t l, size_t v) {
+    VEC lb_nbrs_v, ub_nbrs_v, tmp1, tmp2;
+    MAT lb_p, ub_p;
     if (USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[l];
-        ub_nbrs_v = self->tmp_ub_nbrs[l];
+        lb_nbrs_v = self->lb_nbrs[l][v];
+        ub_nbrs_v = self->ub_nbrs[l][v];
         lb_p      = self->lb_rxcA[l];
         ub_p      = self->ub_rxcA[l];
-        tmp1      = self->tmp_vec1[l];
-        tmp2      = self->tmp_vec2[l];
+        tmp1      = self->vtmp1[l];
+        tmp2      = self->vtmp2[l];
     }
-    if (!USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[l - 1];
-        ub_nbrs_v = self->tmp_ub_nbrs[l - 1];
+    else {
+        lb_nbrs_v = self->lb_tmp[l - 1][v];
+        ub_nbrs_v = self->ub_tmp[l - 1][v];
         lb_p      = self->lb[l - 1];
         ub_p      = self->ub[l - 1];
-        tmp1      = self->tmp_vec1[l - 1];
-        tmp2      = self->tmp_vec2[l - 1];
+        tmp1      = self->vtmp1[l - 1];
+        tmp2      = self->vtmp2[l - 1];
     }
+
+    uint16_t *plist   = GManager_pilist(self->gm, v);
+    uint16_t *qlist   = GManager_qilist(self->gm, v);
+    uint16_t *nlist   = GManager_nilist(self->gm, v);
+    size_t    pdeg    = GManager_pideg(self->gm, v);
+    size_t    qdeg    = GManager_qideg(self->gm, v);
+    size_t    ndeg    = GManager_nideg(self->gm, v);
+    size_t    lbudget = GManager_lbudget(self->gm, v);
 
     // normal
-    MV_acc(lb_nbrs_v, NULL, lb_p, PGraph_niadj(self->G, v));
-    MV_acc(ub_nbrs_v, NULL, ub_p, PGraph_niadj(self->G, v));
+    MV_acc(lb_nbrs_v, NULL, lb_p, nlist, ndeg);
+    MV_acc(ub_nbrs_v, NULL, ub_p, nlist, ndeg);
 
     // potential
-    size_t pideg   = PGraph_pideg(self->G, v);
-    size_t qideg   = IS_DEL_INS ? PGraph_qideg(self->G, v) : 0;
-    size_t lbudget = PGraph_lbudget(self->G, v);
-    // do nothing
-    if (pideg + qideg == 0) {
+    if (pdeg + qdeg == 0) {  // do nothing
     }
-    // sum max/min of all
-    else if (lbudget >= pideg + qideg) {
-        MV_acc_neg(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_piadj(self->G, v));
-        MV_acc_pos(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_piadj(self->G, v));
+    else if (lbudget >= pdeg + qdeg) {  // sum max/min of all
+        MV_acc_neg(lb_nbrs_v, lb_nbrs_v, lb_p, plist, pdeg);
+        MV_acc_pos(ub_nbrs_v, ub_nbrs_v, ub_p, plist, pdeg);
         if (IS_DEL_INS) {
-            MV_acc_neg(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_qiadj(self->G, v));
-            MV_acc_pos(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_qiadj(self->G, v));
+            MV_acc_neg(lb_nbrs_v, lb_nbrs_v, lb_p, qlist, qdeg);
+            MV_acc_pos(ub_nbrs_v, ub_nbrs_v, ub_p, qlist, qdeg);
         }
     }
-    // sum
-    else if (lbudget == 0) {
-        MV_acc(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_piadj(self->G, v));
-        MV_acc(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_piadj(self->G, v));
+    else if (lbudget == 0) {  // sum
+        MV_acc(lb_nbrs_v, lb_nbrs_v, lb_p, plist, pdeg);
+        MV_acc(ub_nbrs_v, ub_nbrs_v, ub_p, plist, pdeg);
     }
-    // sum except the max/min of the min/max element
-    else if ((lbudget == 1) && (qideg == 0)) {
-        MV_acc(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_piadj(self->G, v));
-        MV_acc(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_piadj(self->G, v));
+    else if ((lbudget == 1) && (qdeg == 0)) {
+        // sum except the max/min of the min/max element
+        MV_acc(lb_nbrs_v, lb_nbrs_v, lb_p, plist, pdeg);
+        MV_acc(ub_nbrs_v, ub_nbrs_v, ub_p, plist, pdeg);
 
-        MV_max(tmp1, NULL, lb_p, PGraph_piadj(self->G, v));
+        MV_max(tmp1, NULL, lb_p, plist, pdeg);
         VV_sub_pos(lb_nbrs_v, tmp1);
 
-        MV_min(tmp1, NULL, ub_p, PGraph_piadj(self->G, v));
+        MV_min(tmp1, NULL, ub_p, plist, pdeg);
         VV_sub_neg(ub_nbrs_v, tmp1);
     }
-    // sum except the max/min of the top/last two elements
-    else if ((lbudget == 2) && (qideg == 0)) {
-        MV_acc(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_piadj(self->G, v));
-        MV_acc(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_piadj(self->G, v));
+    else if ((lbudget == 2) && (qdeg == 0)) {
+        // sum except the max/min of the top/last two elements
+        MV_acc(lb_nbrs_v, lb_nbrs_v, lb_p, plist, pdeg);
+        MV_acc(ub_nbrs_v, ub_nbrs_v, ub_p, plist, pdeg);
 
-        MV_max2(tmp1, tmp2, lb_p, PGraph_piadj(self->G, v));
+        MV_max2(tmp1, tmp2, lb_p, plist, pdeg);
         VV_sub_pos(lb_nbrs_v, tmp1);
         VV_sub_pos(lb_nbrs_v, tmp2);
 
-        MV_min2(tmp1, tmp2, ub_p, PGraph_piadj(self->G, v));
+        MV_min2(tmp1, tmp2, ub_p, plist, pdeg);
         VV_sub_neg(ub_nbrs_v, tmp1);
         VV_sub_neg(ub_nbrs_v, tmp2);
     }
-    // general case, sort and sum
-    else {
+    else {  // general case, sort and sum
         // lb
-        MV_acc(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_piadj(self->G, v));
+        MV_acc(lb_nbrs_v, lb_nbrs_v, lb_p, plist, pdeg);
+        size_t counter = BManager_transpose_signed(self, lb_p, v);
         ITER_VEC(lb_nbrs_v, i) {
-            size_t counter = 0;
-            size_t j;
-            ITER_PINBRS(self->G, v, u) {
-                self->tmp[counter] = -MVAL(lb_p, u, i);
-                ++counter;
-            }
-            if (IS_DEL_INS) {
-                ITER_QINBRS(self->G, v, u) {
-                    self->tmp[counter] = MVAL(lb_p, u, i);
-                    ++counter;
-                }
-            }
-            qselect(self->tmp, counter, lbudget);
-            for (j = 0; j < lbudget; ++j) {
-                double val = self->tmp[j];
-                VVAL(lb_nbrs_v, i) += MIN(val, 0.);
-            }
+            double *ptr = self->transpose[i];
+            qselect(ptr, counter, lbudget);
+            for (size_t j = 0; j < lbudget; ++j)
+                lb_nbrs_v[i] += MIN(ptr[j], 0.);
         }
 
         // ub
-        MV_acc(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_piadj(self->G, v));
+        MV_acc(ub_nbrs_v, ub_nbrs_v, ub_p, plist, pdeg);
+        counter = BManager_transpose_signed(self, ub_p, v);
         ITER_VEC(ub_nbrs_v, i) {
-            size_t counter = 0;
-            size_t j;
-            ITER_PINBRS(self->G, v, u) {
-                self->tmp[counter] = -MVAL(ub_p, u, i);
-                ++counter;
-            }
-            if (IS_DEL_INS) {
-                ITER_QINBRS(self->G, v, u) {
-                    self->tmp[counter] = MVAL(ub_p, u, i);
-                    ++counter;
-                }
-            }
-            qselect(self->tmp, counter, counter - lbudget);
-            for (j = 0; j < lbudget; ++j) {
-                double val = self->tmp[counter - lbudget + j];
-                VVAL(ub_nbrs_v, i) += MAX(val, 0.);
-            }
+            double *ptr = self->transpose[i];
+            qselect(ptr, counter, counter - lbudget);
+            for (size_t j = 0; j < lbudget; ++j)
+                ub_nbrs_v[i] += MAX(ptr[counter - lbudget + j], 0.);
         }
     }
-
-    if (!USE_REORDER_COMP)
-        MV_relax(self->tmp_lb_nbrs[l], self->tmp_ub_nbrs[l], CA[l], CA_ABS[l],
-                 lb_nbrs_v, ub_nbrs_v, self->tmp_vec1[l - 1],
-                 self->tmp_vec2[l - 1]);
 }
 
-static void BManager_comp_nbrs_sum_loose(BManager *self, size_t l, size_t v) {
-    VEC *lb_nbrs_v, *ub_nbrs_v;
-    MAT *lb_p, *ub_p;
+static void BManager_nbrs_sum_loose(BManager *self, size_t l, size_t v) {
+    VEC lb_nbrs_v, ub_nbrs_v;
+    MAT lb_p, ub_p;
     if (USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[l];
-        ub_nbrs_v = self->tmp_ub_nbrs[l];
+        lb_nbrs_v = self->lb_nbrs[l][v];
+        ub_nbrs_v = self->ub_nbrs[l][v];
         lb_p      = self->lb_rxcA[l];
         ub_p      = self->ub_rxcA[l];
     }
-    if (!USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[l - 1];
-        ub_nbrs_v = self->tmp_ub_nbrs[l - 1];
+    else {
+        lb_nbrs_v = self->lb_tmp[l - 1][v];
+        ub_nbrs_v = self->ub_tmp[l - 1][v];
         lb_p      = self->lb[l - 1];
         ub_p      = self->ub[l - 1];
     }
 
+    uint16_t *plist = GManager_pilist(self->gm, v);
+    uint16_t *qlist = GManager_qilist(self->gm, v);
+    uint16_t *nlist = GManager_nilist(self->gm, v);
+    size_t    pdeg  = GManager_pideg(self->gm, v);
+    size_t    qdeg  = GManager_qideg(self->gm, v);
+    size_t    ndeg  = GManager_nideg(self->gm, v);
+
     // normal
-    MV_acc(lb_nbrs_v, NULL, lb_p, PGraph_niadj(self->G, v));
-    MV_acc(ub_nbrs_v, NULL, ub_p, PGraph_niadj(self->G, v));
+    MV_acc(lb_nbrs_v, NULL, lb_p, nlist, ndeg);
+    MV_acc(ub_nbrs_v, NULL, ub_p, nlist, ndeg);
 
-    // potential deletion
-    MV_acc_neg(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_piadj(self->G, v));
-    MV_acc_pos(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_piadj(self->G, v));
-
-    // potential insertion
+    // potential
+    MV_acc_neg(lb_nbrs_v, lb_nbrs_v, lb_p, plist, pdeg);
+    MV_acc_pos(ub_nbrs_v, ub_nbrs_v, ub_p, plist, pdeg);
     if (IS_DEL_INS) {
-        MV_acc_neg(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_qiadj(self->G, v));
-        MV_acc_pos(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_qiadj(self->G, v));
+        MV_acc_neg(lb_nbrs_v, lb_nbrs_v, lb_p, qlist, qdeg);
+        MV_acc_pos(ub_nbrs_v, ub_nbrs_v, ub_p, qlist, qdeg);
     }
-
-    if (!USE_REORDER_COMP)
-        MV_relax(self->tmp_lb_nbrs[l], self->tmp_ub_nbrs[l], CA[l], CA_ABS[l],
-                 lb_nbrs_v, ub_nbrs_v, self->tmp_vec1[l - 1],
-                 self->tmp_vec2[l - 1]);
 }
 
-static void BManager_comp_nbrs_sum(BManager *self, size_t l, size_t v) {
+static void BManager_nbrs_sum(BManager *self, size_t l, size_t v) {
     if (USE_TIGHT_BOUND) {
         if (l == 1)
-            BManager_comp_nbrs_sum_fst(self, v);
+            BManager_nbrs_sum_fst(self, v);
         else
-            BManager_comp_nbrs_sum_tail(self, l, v);
+            BManager_nbrs_sum_tail(self, l, v);
     }
     else {
-        BManager_comp_nbrs_sum_loose(self, l, v);
+        BManager_nbrs_sum_loose(self, l, v);
     }
 }
 
 // ------------------------------ comp bounds max ------------------------------
-static void BManager_comp_nbrs_max_tight(BManager *self, size_t l, size_t v) {
-    VEC *lb_nbrs_v = self->tmp_lb_nbrs[l - 1];
-    VEC *ub_nbrs_v = self->tmp_ub_nbrs[l - 1];
-    MAT *lb_p      = self->lb[l - 1];
-    MAT *ub_p      = self->ub[l - 1];
-    VEC *tmp       = self->tmp_vec1[l - 1];
+static void BManager_nbrs_max_tight(BManager *self, size_t l, size_t v) {
+    VEC lb_nbrs_v = self->lb_tmp[l - 1][v];
+    VEC ub_nbrs_v = self->ub_tmp[l - 1][v];
+    MAT lb_p      = self->lb[l - 1];
+    MAT ub_p      = self->ub[l - 1];
+    VEC tmp       = self->vtmp1[l - 1];
+    VEC tmp2      = self->vtmp2[l - 1];
 
-    size_t lbudget = PGraph_lbudget(self->G, v);
-    size_t nideg   = PGraph_nideg(self->G, v);
-    size_t pideg   = PGraph_pideg(self->G, v);
-    size_t qideg   = IS_DEL_INS ? PGraph_qideg(self->G, v) : 0;
-    size_t ideg    = PGraph_ideg(self->G, v);
+    uint16_t *plist   = GManager_pilist(self->gm, v);
+    uint16_t *qlist   = GManager_qilist(self->gm, v);
+    uint16_t *nlist   = GManager_nilist(self->gm, v);
+    uint16_t *glist   = GManager_gilist(self->gm, v);
+    size_t    pdeg    = GManager_pideg(self->gm, v);
+    size_t    qdeg    = GManager_qideg(self->gm, v);
+    size_t    ndeg    = GManager_nideg(self->gm, v);
+    size_t    gdeg    = GManager_gideg(self->gm, v);
+    size_t    lbudget = GManager_lbudget(self->gm, v);
+
     if (lbudget == 0) {
-        if (ideg == 0) {
-            VEC_clear(self->tmp_lb_nbrs[l]);
-            VEC_clear(self->tmp_ub_nbrs[l]);
-            return;  // bypass relaxation
+        if (gdeg == 0) {
+            VEC_clear(lb_nbrs_v);
+            VEC_clear(ub_nbrs_v);
         }
         else {
-            MV_max(lb_nbrs_v, NULL, lb_p, PGraph_iadj(self->G, v));
-            MV_max(ub_nbrs_v, NULL, ub_p, PGraph_iadj(self->G, v));
+            MV_max(lb_nbrs_v, NULL, lb_p, plist, pdeg);
+            MV_max(ub_nbrs_v, NULL, ub_p, plist, pdeg);
         }
     }
-    else if ((nideg == 0) && (pideg == 0) && (qideg == 0)) {
-        VEC_clear(self->tmp_lb_nbrs[l]);
-        VEC_clear(self->tmp_ub_nbrs[l]);
-        return;  // bypass relaxation
+    else if ((ndeg == 0) && (pdeg == 0) && (qdeg == 0)) {
+        VEC_clear(lb_nbrs_v);
+        VEC_clear(ub_nbrs_v);
     }
     else {
         // lb
-        if ((nideg == 0) && (pideg == 0)) {
+        if ((ndeg == 0) && (pdeg == 0)) {
             VEC_clear(lb_nbrs_v);
-            if (qideg > 0)
-                MV_min(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_qiadj(self->G, v));
+            if (qdeg > 0)
+                MV_min(lb_nbrs_v, lb_nbrs_v, lb_p, qlist, qdeg);
         }
-        else if ((nideg > 0) && (pideg == 0)) {
-            MV_max(lb_nbrs_v, NULL, lb_p, PGraph_niadj(self->G, v));
+        else if ((ndeg > 0) && (pdeg == 0)) {
+            MV_max(lb_nbrs_v, NULL, lb_p, nlist, ndeg);
         }
-        else if ((nideg == 0) && (pideg > 0)) {
-            if (lbudget < pideg) {
-                if (lbudget == 1) {
-                    MV_max2(tmp, lb_nbrs_v, lb_p, PGraph_piadj(self->G, v));
-                }
-                else {
-                    ITER_VEC(lb_nbrs_v, i) {
-                        size_t counter = 0;
-                        ITER_PINBRS(self->G, v, u) {
-                            self->tmp[counter] = MVAL(lb_p, u, i);
-                            ++counter;
-                        }
-                        qselect(self->tmp, counter, counter - lbudget - 1);
-                        VVAL(lb_nbrs_v, i) = self->tmp[counter - lbudget - 1];
-                    }
-                }
-            }
-            else {
+        else if ((ndeg == 0) && (pdeg > 0)) {
+            if (lbudget >= pdeg) {
                 VEC_clear(lb_nbrs_v);
-                MV_min(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_piadj(self->G, v));
-                if (qideg > 0)
-                    MV_min(lb_nbrs_v, lb_nbrs_v, lb_p,
-                           PGraph_qiadj(self->G, v));
-            }
-        }
-        else if ((nideg > 0) && (pideg > 0)) {
-            if (lbudget < pideg) {
-                if (lbudget == 1) {
-                    MV_max2(tmp, lb_nbrs_v, lb_p, PGraph_piadj(self->G, v));
-                }
-                else {
-                    ITER_VEC(lb_nbrs_v, i) {
-                        size_t counter = 0;
-                        ITER_PINBRS(self->G, v, u) {
-                            self->tmp[counter] = MVAL(lb_p, u, i);
-                            ++counter;
-                        }
-                        qselect(self->tmp, counter, counter - lbudget - 1);
-                        VVAL(lb_nbrs_v, i) = self->tmp[counter - lbudget - 1];
-                    }
-                }
-                MV_max(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_niadj(self->G, v));
+                MV_min(lb_nbrs_v, lb_nbrs_v, lb_p, plist, pdeg);
+                if (qdeg > 0)
+                    MV_min(lb_nbrs_v, lb_nbrs_v, lb_p, qlist, qdeg);
             }
             else {
-                MV_max(lb_nbrs_v, NULL, lb_p, PGraph_niadj(self->G, v));
+                if (lbudget == 1) {
+                    MV_max2(tmp, lb_nbrs_v, lb_p, plist, pdeg);
+                }
+                else if (pdeg == lbudget + 1) {
+                    MV_min(lb_nbrs_v, NULL, lb_p, plist, pdeg);
+                }
+                else if (pdeg == lbudget + 2) {
+                    MV_min2(tmp, lb_nbrs_v, lb_p, plist, pdeg);
+                }
+                else if (pdeg == lbudget + 3) {
+                    MV_min3(tmp, tmp2, lb_nbrs_v, lb_p, plist, pdeg);
+                }
+                else {
+                    size_t counter =
+                        BManager_transpose_unsigned_p(self, lb_p, v);
+                    ITER_VEC(lb_nbrs_v, i) {
+                        double *ptr = self->transpose[i];
+                        qselect(ptr, counter, counter - lbudget - 1);
+                        lb_nbrs_v[i] = ptr[counter - lbudget - 1];
+                    }
+                }
+            }
+        }
+        else if ((ndeg > 0) && (pdeg > 0)) {
+            if (lbudget >= pdeg) {
+                MV_max(lb_nbrs_v, NULL, lb_p, nlist, ndeg);
+            }
+            else {
+                if (lbudget == 1) {
+                    MV_max2(tmp, lb_nbrs_v, lb_p, plist, pdeg);
+                }
+                else if (pdeg == lbudget + 1) {
+                    MV_min(lb_nbrs_v, NULL, lb_p, plist, pdeg);
+                }
+                else if (pdeg == lbudget + 2) {
+                    MV_min2(tmp, lb_nbrs_v, lb_p, plist, pdeg);
+                }
+                else if (pdeg == lbudget + 3) {
+                    MV_min3(tmp, tmp2, lb_nbrs_v, lb_p, plist, pdeg);
+                }
+                else {
+                    size_t counter =
+                        BManager_transpose_unsigned_p(self, lb_p, v);
+                    ITER_VEC(lb_nbrs_v, i) {
+                        double *ptr = self->transpose[i];
+                        qselect(ptr, counter, counter - lbudget - 1);
+                        lb_nbrs_v[i] = ptr[counter - lbudget - 1];
+                    }
+                }
+                MV_max(lb_nbrs_v, lb_nbrs_v, lb_p, nlist, ndeg);
             }
         }
 
         // ub
-        if ((nideg == 0) && (pideg == 0)) {
+        if ((ndeg == 0) && (pdeg == 0)) {
             VEC_clear(ub_nbrs_v);
         }
-        else if ((nideg > 0) && (pideg == 0)) {
-            MV_max(ub_nbrs_v, NULL, ub_p, PGraph_niadj(self->G, v));
+        else if ((ndeg > 0) && (pdeg == 0)) {
+            MV_max(ub_nbrs_v, NULL, ub_p, nlist, ndeg);
         }
-        else if ((nideg == 0) && (pideg > 0)) {
-            if (lbudget < pideg) {
-                MV_max(ub_nbrs_v, NULL, ub_p, PGraph_piadj(self->G, v));
+        else if ((ndeg == 0) && (pdeg > 0)) {
+            if (lbudget < pdeg) {
+                MV_max(ub_nbrs_v, NULL, ub_p, plist, pdeg);
             }
             else {
                 VEC_clear(ub_nbrs_v);
-                MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_piadj(self->G, v));
+                MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, plist, pdeg);
             }
         }
-        else if ((nideg > 0) && (pideg > 0)) {
-            MV_max(ub_nbrs_v, NULL, ub_p, PGraph_iadj(self->G, v));
+        else if ((ndeg > 0) && (pdeg > 0)) {
+            MV_max(ub_nbrs_v, NULL, ub_p, glist, gdeg);
         }
 
-        if (qideg > 0)
-            MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_qiadj(self->G, v));
+        if (qdeg > 0)
+            MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, qlist, qdeg);
     }
-
-    MV_relax(self->tmp_lb_nbrs[l], self->tmp_ub_nbrs[l], CA[l], CA_ABS[l],
-             lb_nbrs_v, ub_nbrs_v, self->tmp_vec1[l - 1],
-             self->tmp_vec2[l - 1]);
 }
 
-static void BManager_comp_nbrs_max_loose(BManager *self, size_t l, size_t v) {
-    VEC *lb_nbrs_v = self->tmp_lb_nbrs[l - 1];
-    VEC *ub_nbrs_v = self->tmp_ub_nbrs[l - 1];
-    MAT *lb_p      = self->lb[l - 1];
-    MAT *ub_p      = self->ub[l - 1];
+static void BManager_nbrs_max_loose(BManager *self, size_t l, size_t v) {
+    VEC lb_nbrs_v = self->lb_tmp[l - 1][v];
+    VEC ub_nbrs_v = self->ub_tmp[l - 1][v];
+    MAT lb_p      = self->lb[l - 1];
+    MAT ub_p      = self->ub[l - 1];
 
-    size_t nideg = PGraph_nideg(self->G, v);
-    size_t pideg = PGraph_pideg(self->G, v);
-    size_t qideg = IS_DEL_INS ? PGraph_qideg(self->G, v) : 0;
+    uint16_t *plist = GManager_pilist(self->gm, v);
+    uint16_t *qlist = GManager_qilist(self->gm, v);
+    uint16_t *nlist = GManager_nilist(self->gm, v);
+    size_t    pdeg  = GManager_pideg(self->gm, v);
+    size_t    qdeg  = GManager_qideg(self->gm, v);
+    size_t    ndeg  = GManager_nideg(self->gm, v);
 
-    if (nideg > 0) {
-        MV_max(lb_nbrs_v, NULL, lb_p, PGraph_niadj(self->G, v));
-        MV_max(ub_nbrs_v, NULL, ub_p, PGraph_niadj(self->G, v));
-        if (pideg > 0)
-            MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_piadj(self->G, v));
-        if (qideg > 0)
-            MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_qiadj(self->G, v));
+    if (ndeg > 0) {
+        MV_max(lb_nbrs_v, NULL, lb_p, nlist, ndeg);
+        MV_max(ub_nbrs_v, NULL, ub_p, nlist, ndeg);
+        if (pdeg > 0)
+            MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, plist, pdeg);
+        if (qdeg > 0)
+            MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, qlist, qdeg);
     }
     else {
         VEC_clear(lb_nbrs_v);
         VEC_clear(ub_nbrs_v);
-        if (pideg > 0) {
-            MV_min(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_piadj(self->G, v));
-            MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_piadj(self->G, v));
+        if (pdeg > 0) {
+            MV_min(lb_nbrs_v, lb_nbrs_v, lb_p, plist, pdeg);
+            MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, plist, pdeg);
         }
-        if (qideg > 0) {
-            MV_min(lb_nbrs_v, lb_nbrs_v, lb_p, PGraph_qiadj(self->G, v));
-            MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, PGraph_qiadj(self->G, v));
+        if (qdeg > 0) {
+            MV_min(lb_nbrs_v, lb_nbrs_v, lb_p, qlist, qdeg);
+            MV_max(ub_nbrs_v, ub_nbrs_v, ub_p, qlist, qdeg);
         }
     }
-
-    MV_relax(self->tmp_lb_nbrs[l], self->tmp_ub_nbrs[l], CA[l], CA_ABS[l],
-             lb_nbrs_v, ub_nbrs_v, self->tmp_vec1[l - 1],
-             self->tmp_vec2[l - 1]);
 }
 
-static void BManager_comp_nbrs_max(BManager *self, size_t l, size_t v) {
+static void BManager_nbrs_max(BManager *self, size_t l, size_t v) {
     if (USE_TIGHT_BOUND)
-        BManager_comp_nbrs_max_tight(self, l, v);
+        BManager_nbrs_max_tight(self, l, v);
     else
-        BManager_comp_nbrs_max_loose(self, l, v);
+        BManager_nbrs_max_loose(self, l, v);
 }
 
 // ----------------------------- comp bounds mean ------------------------------
-static void BManager_comp_nbrs_mean_fst(BManager *self, size_t v) {
-    VEC   *lb_nbrs_v, *ub_nbrs_v;
-    MAT   *feat_p;
-    size_t n;
+static void BManager_nbrs_mean_fst(BManager *self, size_t v) {
+    VEC lb_nbrs_v, ub_nbrs_v;
+    MAT feat_p;
     if (USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[1];
-        ub_nbrs_v = self->tmp_ub_nbrs[1];
+        lb_nbrs_v = self->lb_nbrs[1][v];
+        ub_nbrs_v = self->ub_nbrs[1][v];
         feat_p    = INPUT_FEAT_RXCA;
     }
-    if (!USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[0];
-        ub_nbrs_v = self->tmp_ub_nbrs[0];
+    else {
+        lb_nbrs_v = self->lb_tmp[0][v];
+        ub_nbrs_v = self->ub_tmp[0][v];
         feat_p    = INPUT_FEAT;
     }
 
+    uint16_t *nlist   = GManager_nilist(self->gm, v);
+    size_t    ndeg    = GManager_nideg(self->gm, v);
+    size_t    lbudget = GManager_lbudget(self->gm, v);
+
     // normal
-    MV_acc(lb_nbrs_v, NULL, feat_p, PGraph_niadj(self->G, v));
-    MV_acc(ub_nbrs_v, NULL, feat_p, PGraph_niadj(self->G, v));
+    MV_acc(lb_nbrs_v, NULL, feat_p, nlist, ndeg);
+    MV_acc(ub_nbrs_v, NULL, feat_p, nlist, ndeg);
 
     // potential
-    size_t lbudget = PGraph_lbudget(self->G, v);
-    size_t nideg   = PGraph_nideg(self->G, v);
+    size_t counter = BManager_transpose_unsigned(self, feat_p, v);
     ITER_VEC(lb_nbrs_v, i) {
-        size_t counter = 0;
-        ITER_PINBRS(self->G, v, u) {
-            self->tmp[counter] = MVAL(feat_p, u, i);
-            ++counter;
-        }
-        qsortd(self->tmp, counter);
+        double *ptr = self->transpose[i];
+        qsortd(ptr, counter);
 
         // lb
-        n = nideg;
+        size_t n = ndeg;
         for (size_t j = 0; j < counter; ++j) {
-            double val = self->tmp[j];
+            double val = ptr[j];
             if (n == 0 && val > 0.)
                 break;
             if (!USE_TIGHT_BOUND || (j + lbudget >= counter))
-                if (val * n > VVAL(lb_nbrs_v, i))
+                if (val * n > lb_nbrs_v[i])
                     break;
-            VVAL(lb_nbrs_v, i) += val;
+            lb_nbrs_v[i] += val;
             n++;
         }
         if (n > 0)
-            VVAL(lb_nbrs_v, i) = VVAL(lb_nbrs_v, i) / n;
+            lb_nbrs_v[i] = lb_nbrs_v[i] / n;
 
         // ub
-        n = nideg;
+        n = ndeg;
         for (size_t j = 0; j < counter; ++j) {
-            double val = self->tmp[counter - j - 1];
+            double val = ptr[counter - j - 1];
             if (n == 0 && val < 0.)
                 break;
             if (!USE_TIGHT_BOUND || (j + lbudget >= counter)) {
-                if (val * n < VVAL(ub_nbrs_v, i))
+                if (val * n < ub_nbrs_v[i])
                     break;
             }
-            VVAL(ub_nbrs_v, i) += val;
+            ub_nbrs_v[i] += val;
             n++;
         }
         if (n > 0)
-            VVAL(ub_nbrs_v, i) = VVAL(ub_nbrs_v, i) / n;
+            ub_nbrs_v[i] = ub_nbrs_v[i] / n;
     }
-
-    if (!USE_REORDER_COMP)
-        MV_relax(self->tmp_lb_nbrs[1], self->tmp_ub_nbrs[1], CA[1], CA_ABS[1],
-                 lb_nbrs_v, ub_nbrs_v, self->tmp_vec1[0], self->tmp_vec2[0]);
 }
 
-static void BManager_comp_nbrs_mean_tail(BManager *self, size_t l, size_t v) {
-    VEC   *lb_nbrs_v, *ub_nbrs_v;
-    MAT   *lb_p, *ub_p;
-    size_t n;
+static void BManager_nbrs_mean_tail(BManager *self, size_t l, size_t v) {
+    VEC lb_nbrs_v, ub_nbrs_v;
+    MAT lb_p, ub_p;
     if (USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[l];
-        ub_nbrs_v = self->tmp_ub_nbrs[l];
+        lb_nbrs_v = self->lb_nbrs[l][v];
+        ub_nbrs_v = self->ub_nbrs[l][v];
         lb_p      = self->lb_rxcA[l];
         ub_p      = self->ub_rxcA[l];
-    }
-    if (!USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[l - 1];
-        ub_nbrs_v = self->tmp_ub_nbrs[l - 1];
-        lb_p      = self->lb[l - 1];
-        ub_p      = self->ub[l - 1];
-    }
-
-    // normal
-    MV_acc(lb_nbrs_v, NULL, lb_p, PGraph_niadj(self->G, v));
-    MV_acc(ub_nbrs_v, NULL, ub_p, PGraph_niadj(self->G, v));
-
-    // potential
-    size_t lbudget = PGraph_lbudget(self->G, v);
-    size_t nideg   = PGraph_nideg(self->G, v);
-    ITER_VEC(lb_nbrs_v, i) {  // lb
-        size_t counter = 0;
-        ITER_PINBRS(self->G, v, u) {
-            self->tmp[counter] = MVAL(lb_p, u, i);
-            ++counter;
-        }
-        qsortd(self->tmp, counter);
-
-        n = nideg;
-        for (size_t j = 0; j < counter; ++j) {
-            double val = self->tmp[j];
-            if (n == 0 && val > 0.)
-                break;
-            if (!USE_TIGHT_BOUND || (j + lbudget >= counter)) {
-                if (val * n > VVAL(lb_nbrs_v, i))
-                    break;
-            }
-            VVAL(lb_nbrs_v, i) += val;
-            ++n;
-        }
-        if (n > 0)
-            VVAL(lb_nbrs_v, i) = VVAL(lb_nbrs_v, i) / n;
-    }
-
-    ITER_VEC(ub_nbrs_v, i) {  // ub
-        size_t counter = 0;
-        ITER_PINBRS(self->G, v, u) {
-            self->tmp[counter] = MVAL(ub_p, u, i);
-            ++counter;
-        }
-        qsortd(self->tmp, counter);
-
-        n = nideg;
-        for (size_t j = 0; j < counter; ++j) {
-            double val = self->tmp[counter - j - 1];
-            if (n == 0 && val < 0.)
-                break;
-            if (!USE_TIGHT_BOUND || (j + lbudget >= counter)) {
-                if (val * n < VVAL(ub_nbrs_v, i))
-                    break;
-            }
-            VVAL(ub_nbrs_v, i) += val;
-            ++n;
-        }
-        if (n > 0)
-            VVAL(ub_nbrs_v, i) = VVAL(ub_nbrs_v, i) / n;
-    }
-
-    if (!USE_REORDER_COMP)
-        MV_relax(self->tmp_lb_nbrs[l], self->tmp_ub_nbrs[l], CA[l], CA_ABS[l],
-                 lb_nbrs_v, ub_nbrs_v, self->tmp_vec1[l - 1],
-                 self->tmp_vec2[l - 1]);
-}
-
-static void BManager_comp_nbrs_mean_delins(BManager *self, size_t l, size_t v) {
-    VEC   *lb_nbrs_v, *ub_nbrs_v;
-    MAT   *lb_p, *ub_p;
-    size_t n;
-    if (USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[l];
-        ub_nbrs_v = self->tmp_ub_nbrs[l];
-        lb_p      = self->lb_rxcA[l];
-        ub_p      = self->ub_rxcA[l];
-    }
-    if (!USE_REORDER_COMP) {
-        lb_nbrs_v = self->tmp_lb_nbrs[l - 1];
-        ub_nbrs_v = self->tmp_ub_nbrs[l - 1];
-        lb_p      = self->lb[l - 1];
-        ub_p      = self->ub[l - 1];
-    }
-
-    // normal
-    MV_acc(lb_nbrs_v, NULL, lb_p, PGraph_niadj(self->G, v));
-    MV_acc(ub_nbrs_v, NULL, ub_p, PGraph_niadj(self->G, v));
-
-    // potential
-    size_t nideg = PGraph_nideg(self->G, v);
-    ITER_VEC(lb_nbrs_v, i) {  // lb
-        size_t counter = 0;
-        ITER_PINBRS(self->G, v, u) {
-            self->tmp[counter] = MVAL(lb_p, u, i);
-            ++counter;
-        }
-        ITER_QINBRS(self->G, v, u) {
-            self->tmp[counter] = MVAL(lb_p, u, i);
-            ++counter;
-        }
-        qsortd(self->tmp, counter);
-
-        n = nideg;
-        for (size_t j = 0; j < counter; ++j) {
-            double val = self->tmp[j];
-            if (n == 0 && val > 0.)
-                break;
-            if (val * n > VVAL(lb_nbrs_v, i))
-                break;
-            VVAL(lb_nbrs_v, i) += val;
-            n++;
-        }
-        if (n > 0)
-            VVAL(lb_nbrs_v, i) = VVAL(lb_nbrs_v, i) / n;
-    }
-
-    ITER_VEC(ub_nbrs_v, i) {  // ub
-        size_t counter = 0;
-        ITER_PINBRS(self->G, v, u) {
-            self->tmp[counter] = MVAL(ub_p, u, i);
-            ++counter;
-        }
-        ITER_QINBRS(self->G, v, u) {
-            self->tmp[counter] = MVAL(ub_p, u, i);
-            ++counter;
-        }
-        qsortd(self->tmp, counter);
-
-        n = nideg;
-        for (size_t j = 0; j < counter; ++j) {
-            double val = self->tmp[counter - j - 1];
-            if (n == 0 && val < 0.)
-                break;
-            if (val * n < VVAL(ub_nbrs_v, i))
-                break;
-            VVAL(ub_nbrs_v, i) += val;
-            n++;
-        }
-        if (n > 0)
-            VVAL(ub_nbrs_v, i) = VVAL(ub_nbrs_v, i) / n;
-    }
-
-    if (!USE_REORDER_COMP)
-        MV_relax(self->tmp_lb_nbrs[l], self->tmp_ub_nbrs[l], CA[l], CA_ABS[l],
-                 lb_nbrs_v, ub_nbrs_v, self->tmp_vec1[l - 1],
-                 self->tmp_vec2[l - 1]);
-}
-
-static void BManager_comp_nbrs_mean(BManager *self, size_t l, size_t v) {
-    if (IS_DEL_ONLY) {
-        if (l == 1)
-            BManager_comp_nbrs_mean_fst(self, v);
-        else
-            BManager_comp_nbrs_mean_tail(self, l, v);
     }
     else {
-        BManager_comp_nbrs_mean_delins(self, l, v);
+        lb_nbrs_v = self->lb_tmp[l - 1][v];
+        ub_nbrs_v = self->ub_tmp[l - 1][v];
+        lb_p      = self->lb[l - 1];
+        ub_p      = self->ub[l - 1];
+    }
+
+    uint16_t *nlist   = GManager_nilist(self->gm, v);
+    size_t    ndeg    = GManager_nideg(self->gm, v);
+    size_t    lbudget = GManager_lbudget(self->gm, v);
+
+    // normal
+    MV_acc(lb_nbrs_v, NULL, lb_p, nlist, ndeg);
+    MV_acc(ub_nbrs_v, NULL, ub_p, nlist, ndeg);
+
+    // potential
+    // lb
+    size_t counter = BManager_transpose_unsigned(self, lb_p, v);
+    ITER_VEC(lb_nbrs_v, i) {
+        double *ptr = self->transpose[i];
+        qsortd(ptr, counter);
+
+        size_t n = ndeg;
+        for (size_t j = 0; j < counter; ++j) {
+            double val = ptr[j];
+            if (n == 0 && val > 0.)
+                break;
+            if (!USE_TIGHT_BOUND || (j + lbudget >= counter)) {
+                if (val * n > lb_nbrs_v[i])
+                    break;
+            }
+            lb_nbrs_v[i] += val;
+            ++n;
+        }
+        if (n > 0)
+            lb_nbrs_v[i] = lb_nbrs_v[i] / n;
+    }
+
+    // ub
+    counter = BManager_transpose_unsigned(self, ub_p, v);
+    ITER_VEC(ub_nbrs_v, i) {
+        double *ptr = self->transpose[i];
+        qsortd(ptr, counter);
+
+        size_t n = ndeg;
+        for (size_t j = 0; j < counter; ++j) {
+            double val = ptr[counter - j - 1];
+            if (n == 0 && val < 0.)
+                break;
+            if (!USE_TIGHT_BOUND || (j + lbudget >= counter)) {
+                if (val * n < ub_nbrs_v[i])
+                    break;
+            }
+            ub_nbrs_v[i] += val;
+            ++n;
+        }
+        if (n > 0)
+            ub_nbrs_v[i] = ub_nbrs_v[i] / n;
+    }
+}
+
+static void BManager_nbrs_mean_delins(BManager *self, size_t l, size_t v) {
+    VEC    lb_nbrs_v, ub_nbrs_v;
+    MAT    lb_p, ub_p;
+    size_t n;
+    if (USE_REORDER_COMP) {
+        lb_nbrs_v = self->lb_nbrs[l][v];
+        ub_nbrs_v = self->ub_nbrs[l][v];
+        lb_p      = self->lb_rxcA[l];
+        ub_p      = self->ub_rxcA[l];
+    }
+    else {
+        lb_nbrs_v = self->lb_tmp[l - 1][v];
+        ub_nbrs_v = self->ub_tmp[l - 1][v];
+        lb_p      = self->lb[l - 1];
+        ub_p      = self->ub[l - 1];
+    }
+
+    uint16_t *nlist = GManager_nilist(self->gm, v);
+    size_t    ndeg  = GManager_nideg(self->gm, v);
+
+    // normal
+    MV_acc(lb_nbrs_v, NULL, lb_p, nlist, ndeg);
+    MV_acc(ub_nbrs_v, NULL, ub_p, nlist, ndeg);
+
+    // potential
+    // lb
+    size_t counter = BManager_transpose_unsigned(self, lb_p, v);
+    ITER_VEC(lb_nbrs_v, i) {
+        double *ptr = self->transpose[i];
+        qsortd(ptr, counter);
+
+        n = ndeg;
+        for (size_t j = 0; j < counter; ++j) {
+            double val = ptr[j];
+            if (n == 0 && val > 0.)
+                break;
+            if (val * n > lb_nbrs_v[i])
+                break;
+            lb_nbrs_v[i] += val;
+            n++;
+        }
+        if (n > 0)
+            lb_nbrs_v[i] = lb_nbrs_v[i] / n;
+    }
+
+    // ub
+    counter = BManager_transpose_unsigned(self, ub_p, v);
+    ITER_VEC(ub_nbrs_v, i) {
+        double *ptr = self->transpose[i];
+        qsortd(ptr, counter);
+
+        n = ndeg;
+        for (size_t j = 0; j < counter; ++j) {
+            double val = ptr[counter - j - 1];
+            if (n == 0 && val < 0.)
+                break;
+            if (val * n < ub_nbrs_v[i])
+                break;
+            ub_nbrs_v[i] += val;
+            n++;
+        }
+        if (n > 0)
+            ub_nbrs_v[i] = ub_nbrs_v[i] / n;
+    }
+}
+
+static void BManager_nbrs_mean(BManager *self, size_t l, size_t v) {
+    if (IS_DEL_ONLY) {
+        if (l == 1)
+            BManager_nbrs_mean_fst(self, v);
+        else
+            BManager_nbrs_mean_tail(self, l, v);
+    }
+    else {
+        BManager_nbrs_mean_delins(self, l, v);
     }
 }
 
 // -------------------------------- comp bounds --------------------------------
-static void BManager_comp_self(BManager *self, size_t l, size_t v) {
-    VEC *lb_self_v = self->tmp_lb_self[l];
-    VEC *ub_self_v = self->tmp_ub_self[l];
-
-    if (l == 1) {
-        VEC_copy(lb_self_v, MSLICE(INPUT_FEAT_RXCC_CB, v));
-        VEC_copy(ub_self_v, MSLICE(INPUT_FEAT_RXCC_CB, v));
-    }
-    else {
-        VEC *lb_vp = MSLICE(self->lb[l - 1], v);
-        VEC *ub_vp = MSLICE(self->ub[l - 1], v);
-        MV_relax(lb_self_v, ub_self_v, CC[l], CC_ABS[l], lb_vp, ub_vp,
-                 self->tmp_vec1[l - 1], self->tmp_vec2[l - 1]);
-        VV_add(lb_self_v, lb_self_v, CB[l]);
-        VV_add(ub_self_v, ub_self_v, CB[l]);
-    }
-}
-
-static void BManager_comp_bound(BManager *self, size_t l, size_t v) {
-    VEC *lb_v      = MSLICE(self->lb[l], v);
-    VEC *ub_v      = MSLICE(self->ub[l], v);
-    VEC *lb_self_v = MSLICE(self->lb_self[l], v);
-    VEC *ub_self_v = MSLICE(self->ub_self[l], v);
-    VEC *lb_nbrs_v = MSLICE(self->lb_nbrs[l], v);
-    VEC *ub_nbrs_v = MSLICE(self->ub_nbrs[l], v);
-
-    VV_add(lb_v, lb_self_v, lb_nbrs_v);
-    VV_add(ub_v, ub_self_v, ub_nbrs_v);
-
-    if (NOT_LAST_LAYER(l)) {
-        VEC_relu(lb_v);
-        VEC_relu(ub_v);
-    }
-    if (USE_REORDER_COMP && !IS_MAX_GNN && NOT_LAST_LAYER(l)) {
-        VEC *lb_rxcA_vn = MSLICE(self->lb_rxcA[l + 1], v);
-        VEC *ub_rxcA_vn = MSLICE(self->ub_rxcA[l + 1], v);
-        MV_relax(lb_rxcA_vn, ub_rxcA_vn, CA[l + 1], CA_ABS[l + 1], lb_v, ub_v,
-                 self->tmp_vec1[l], self->tmp_vec2[l]);
-    }
-}
-
 static void BManager_comp(BManager *self) {
     ITER_LAYERS(l) {
-        ITER_VTXS(v) {
-            BManager_comp_self(self, l, v);
-            if (IS_SUM_GNN)
-                BManager_comp_nbrs_sum(self, l, v);
-            if (IS_MAX_GNN)
-                BManager_comp_nbrs_max(self, l, v);
-            if (IS_MEAN_GNN)
-                BManager_comp_nbrs_mean(self, l, v);
-            MV_SWAP(self->tmp_lb_self[l], self->lb_self[l], v);
-            MV_SWAP(self->tmp_ub_self[l], self->ub_self[l], v);
-            MV_SWAP(self->tmp_lb_nbrs[l], self->lb_nbrs[l], v);
-            MV_SWAP(self->tmp_ub_nbrs[l], self->ub_nbrs[l], v);
-            BManager_comp_bound(self, l, v);
+        // comp self
+        if (l > 1)
+            MM_relax_trans(self->lb_self[l], self->ub_self[l], self->lb[l - 1],
+                           self->ub[l - 1], CC[l], CB[l], self->mtmp1[l - 1],
+                           self->mtmp2[l - 1], NULL, 0);
+
+        // comp nbrs
+        if (IS_SUM_GNN) {
+            ITER_VTXS(v) {
+                BManager_nbrs_sum(self, l, v);
+            }
+        }
+        else if (IS_MAX_GNN) {
+            ITER_VTXS(v) {
+                BManager_nbrs_max(self, l, v);
+            }
+        }
+        else {
+            assert(IS_MEAN_GNN);
+            ITER_VTXS(v) {
+                BManager_nbrs_mean(self, l, v);
+            }
+        }
+        if (!USE_REORDER_COMP || IS_MAX_GNN)
+            MM_relax_trans(self->lb_nbrs[l], self->ub_nbrs[l],
+                           self->lb_tmp[l - 1], self->ub_tmp[l - 1], CA[l],
+                           NULL, self->mtmp1[l - 1], self->mtmp2[l - 1], NULL,
+                           0);
+
+        // comp feat
+        if (NOT_LAST_LAYER(l)) {
+            ITER_VTXS(v) {
+                VV_add_relu(self->lb[l][v], self->lb_self[l][v],
+                            self->lb_nbrs[l][v]);
+                VV_add_relu(self->ub[l][v], self->ub_self[l][v],
+                            self->ub_nbrs[l][v]);
+            }
+        }
+        else {
+            ITER_VTXS(v) {
+                VV_add(self->lb[l][v], self->lb_self[l][v],
+                       self->lb_nbrs[l][v]);
+                VV_add(self->ub[l][v], self->ub_self[l][v],
+                       self->ub_nbrs[l][v]);
+            }
+        }
+
+        // comp rxcA
+        if (USE_REORDER_COMP && !IS_MAX_GNN && NOT_LAST_LAYER(l)) {
+            MM_relax_trans(self->lb_rxcA[l + 1], self->ub_rxcA[l + 1],
+                           self->lb[l], self->ub[l], CA[l + 1], NULL,
+                           self->mtmp1[l], self->mtmp2[l], NULL, 0);
         }
     }
-    if (IS_GRAPH_CLASS) {
-        MV_acc(self->ub_pool, NULL, self->ub[N_LAYERS], NULL);
-        VV_add(self->ub_pool, self->ub_pool, CBL);
-    }
+
+    if (IS_GRAPH_CLASS)
+        MV_acc(self->ub_pool, CBP, self->ub[N_LAYERS], NULL, 0);
 }
 
 // ------------------------------- update bounds -------------------------------
-static void BManager_update_single(BManager *self, size_t l, size_t v) {
-    bool is_dirty_self = BArray_test(self->dirty_self, v);
-    bool is_dirty_nbrs = BArray_test(self->dirty_nbrs, v);
-    if (!is_dirty_self && !is_dirty_nbrs)
-        return;
+static void BManager_update(BManager *self) {
+    BManagerSnap *snap         = self->snap;
+    uint16_t    **index        = snap->index;
+    uint16_t     *counter_self = snap->counter_self;
+    uint16_t     *counter_nbrs = snap->counter_nbrs;
 
-    // comp
-    if (is_dirty_self)
-        BManager_comp_self(self, l, v);
-    if (IS_SUM_GNN)
-        BManager_comp_nbrs_sum(self, l, v);
-    if (IS_MAX_GNN)
-        BManager_comp_nbrs_max(self, l, v);
-    if (IS_MEAN_GNN)
-        BManager_comp_nbrs_mean(self, l, v);
+    // comp index
+    GManager_comp_index_b(self->gm, index, counter_self, counter_nbrs);
 
     // push
-    if (IS_GRAPH_CLASS && IS_LAST_LAYER(l))
-        VV_sub(self->ub_pool, self->ub_pool, MSLICE(self->ub[l], v));
-    BManager_push_snap(self, l, v, is_dirty_self, is_dirty_nbrs);
+    BManager_push_snap(self);
 
-    // swap and comp
-    if (is_dirty_self) {
-        MV_SWAP(self->tmp_lb_self[l], self->lb_self[l], v);
-        MV_SWAP(self->tmp_ub_self[l], self->ub_self[l], v);
-    }
-    if (is_dirty_nbrs) {
-        MV_SWAP(self->tmp_lb_nbrs[l], self->lb_nbrs[l], v);
-        MV_SWAP(self->tmp_ub_nbrs[l], self->ub_nbrs[l], v);
-    }
-    BManager_comp_bound(self, l, v);
-
-    // update pool
-    if (IS_GRAPH_CLASS && IS_LAST_LAYER(l))
-        VV_add(self->ub_pool, self->ub_pool, MSLICE(self->ub[l], v));
-
-    // propagate
-    if (NOT_LAST_LAYER(l)) {
-        BArray_set(self->dirty_self_next, v);
-        BArray_union(self->dirty_nbrs_next, PGraph_oadj(self->G, v));
-    }
-}
-
-static void BManager_update(BManager *self) {
     ITER_LAYERS(l) {
-        // init dirty vertices
-        if (l == 1) {
-            BArray_clear(self->dirty_self);
-            BArray_clear(self->dirty_nbrs);
+        uint16_t *index_l        = index[IS_NODE_CLASS ? l : 1];
+        uint16_t  counter_self_l = counter_self[l];
+        uint16_t  counter_nbrs_l = counter_nbrs[l];
+
+        // comp self
+        if (counter_self[l] > 0)
+            MM_relax_trans(self->lb_self[l], self->ub_self[l], self->lb[l - 1],
+                           self->ub[l - 1], CC[l], CB[l], self->mtmp1[l - 1],
+                           self->mtmp2[l - 1], index_l, counter_self_l);
+
+        // comp nbrs
+        if (IS_SUM_GNN) {
+            for (size_t i = 0; i < counter_nbrs_l; ++i) {
+                size_t v = index_l[i];
+                BManager_nbrs_sum(self, l, v);
+            }
+        }
+        else if (IS_MAX_GNN) {
+            for (size_t i = 0; i < counter_nbrs_l; ++i) {
+                size_t v = index_l[i];
+                BManager_nbrs_max(self, l, v);
+            }
         }
         else {
-            BArray *tmp;
-            tmp                   = self->dirty_self;
-            self->dirty_self      = self->dirty_self_next;
-            self->dirty_self_next = tmp;
-            tmp                   = self->dirty_nbrs;
-            self->dirty_nbrs      = self->dirty_nbrs_next;
-            self->dirty_nbrs_next = tmp;
-        }
-        BArray_clear(self->dirty_self_next);
-        BArray_clear(self->dirty_nbrs_next);
-
-        // set dirty vertices
-        Edge_type edge_type = PGraph_edge_type(self->G);
-        Op_type   op_type   = PGraph_op_type(self->G);
-        // nodes with edges changed
-        BArray_union(self->dirty_nbrs, PGraph_updated_edges(self->G));
-        // nodes with local budgets changed
-        if ((edge_type == PEDGE) && (op_type == CUT))
-            BArray_union(self->dirty_nbrs, PGraph_updated_budgets(self->G));
-        if ((edge_type == QEDGE) && (op_type == CON))
-            BArray_union(self->dirty_nbrs, PGraph_updated_budgets(self->G));
-
-        // update bounds
-        if (IS_NODE_CLASS) {
-            ITER_KNBRS(self->G, N_LAYERS - l, v) {
-                BManager_update_single(self, l, v);
+            assert(IS_MEAN_GNN);
+            for (size_t i = 0; i < counter_nbrs_l; ++i) {
+                size_t v = index_l[i];
+                BManager_nbrs_mean(self, l, v);
             }
         }
-        if (IS_GRAPH_CLASS) {
-            ITER_VTXS(v) {
-                BManager_update_single(self, l, v);
+        if ((!USE_REORDER_COMP || IS_MAX_GNN) && (counter_nbrs_l > 0))
+            MM_relax_trans(self->lb_nbrs[l], self->ub_nbrs[l],
+                           self->lb_tmp[l - 1], self->ub_tmp[l - 1], CA[l],
+                           NULL, self->mtmp1[l - 1], self->mtmp2[l - 1],
+                           index_l, counter_nbrs_l);
+
+        // comp bound
+        if (NOT_LAST_LAYER(l)) {
+            for (size_t i = 0; i < counter_nbrs_l; ++i) {
+                size_t v = index_l[i];
+                VV_add_relu(self->lb[l][v], self->lb_self[l][v],
+                            self->lb_nbrs[l][v]);
+                VV_add_relu(self->ub[l][v], self->ub_self[l][v],
+                            self->ub_nbrs[l][v]);
             }
+        }
+        else {
+            for (size_t i = 0; i < counter_nbrs_l; ++i) {
+                size_t v = index_l[i];
+                VV_add(self->lb[l][v], self->lb_self[l][v],
+                       self->lb_nbrs[l][v]);
+                VV_add(self->ub[l][v], self->ub_self[l][v],
+                       self->ub_nbrs[l][v]);
+            }
+        }
+
+        // comp rxcA
+        if (USE_REORDER_COMP && !IS_MAX_GNN && NOT_LAST_LAYER(l))
+            MM_relax_trans(self->lb_rxcA[l + 1], self->ub_rxcA[l + 1],
+                           self->lb[l], self->ub[l], CA[l + 1], NULL,
+                           self->mtmp1[l], self->mtmp2[l], index_l,
+                           counter_nbrs_l);
+    }
+
+    // pool
+    if (IS_GRAPH_CLASS) {
+        uint16_t *index_l        = index[IS_NODE_CLASS ? N_LAYERS : 1];
+        uint16_t  counter_nbrs_l = counter_nbrs[N_LAYERS];
+        for (size_t i = 0; i < counter_nbrs_l; ++i) {
+            size_t v = index_l[i];
+            VV_add(self->ub_pool, self->ub_pool, self->ub[N_LAYERS][v]);
         }
     }
 }
 
 // ---------------------------------- status -----------------------------------
-void BManager_init(BManager *self) {
-    // allocate
-    self->lb          = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
-    self->ub          = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
-    self->lb_self     = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
-    self->ub_self     = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
-    self->lb_nbrs     = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
-    self->ub_nbrs     = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
-    self->lb_rxcA     = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
-    self->ub_rxcA     = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
-    self->tmp_lb_self = XMALLOC(N_LAYERS_EXT * sizeof(VEC *));
-    self->tmp_ub_self = XMALLOC(N_LAYERS_EXT * sizeof(VEC *));
-    self->tmp_lb_nbrs = XMALLOC(N_LAYERS_EXT * sizeof(VEC *));
-    self->tmp_ub_nbrs = XMALLOC(N_LAYERS_EXT * sizeof(VEC *));
-    self->tmp_vec1    = XMALLOC(N_LAYERS_EXT * sizeof(VEC *));
-    self->tmp_vec2    = XMALLOC(N_LAYERS_EXT * sizeof(VEC *));
-
-    ITER_LAYERS(l) {
-        self->lb[l]      = MAT_alloc(N_VERTICES, DIM[l]);
-        self->ub[l]      = MAT_alloc(N_VERTICES, DIM[l]);
-        self->lb_self[l] = MAT_alloc(N_VERTICES, DIM[l]);
-        self->ub_self[l] = MAT_alloc(N_VERTICES, DIM[l]);
-        self->lb_nbrs[l] = MAT_alloc(N_VERTICES, DIM[l]);
-        self->ub_nbrs[l] = MAT_alloc(N_VERTICES, DIM[l]);
-        if (l == 1)
-            continue;
-        self->lb_rxcA[l] = MAT_alloc(N_VERTICES, DIM[l]);
-        self->ub_rxcA[l] = MAT_alloc(N_VERTICES, DIM[l]);
-    }
-    ITER_LAYERS_EXT(l) {
-        self->tmp_lb_self[l] = VEC_alloc(DIM[l]);
-        self->tmp_ub_self[l] = VEC_alloc(DIM[l]);
-        self->tmp_lb_nbrs[l] = VEC_alloc(DIM[l]);
-        self->tmp_ub_nbrs[l] = VEC_alloc(DIM[l]);
-        self->tmp_vec1[l]    = VEC_alloc(DIM[l]);
-        self->tmp_vec2[l]    = VEC_alloc(DIM[l]);
-    }
-    self->ub_pool = VEC_alloc(DIM_LAST);
-
-    self->tmp = XMALLOC(N_VERTICES * sizeof(double));
-
-    self->dirty_self      = BArray_alloc(N_VERTICES);
-    self->dirty_self_next = BArray_alloc(N_VERTICES);
-    self->dirty_nbrs      = BArray_alloc(N_VERTICES);
-    self->dirty_nbrs_next = BArray_alloc(N_VERTICES);
-
-    self->stack =
-        Stack_alloc(sizeof(BManagerSnap), N_LAYERS, BManager_snap_free);
-    self->stack_pool =
-        Stack_alloc(sizeof(BManagerPoolSnap), 1, BManager_poolsnap_free);
-
-    self->clock = 0;
-
-    // init
-    self->init       = true;
-    self->lb[0]      = INPUT_FEAT;
-    self->ub[0]      = INPUT_FEAT;
-    self->lb_rxcA[1] = INPUT_FEAT_RXCA;
-    self->ub_rxcA[1] = INPUT_FEAT_RXCA;
-    BManager_comp(self);
-}
-
 void BManager_push(BManager *self) {
-    Stack_push_marker(self->stack);
+    BManagerSnap *snap = (BManagerSnap *)Stack_push(&self->stack);
 
-    if (IS_GRAPH_CLASS) {
-        BManagerPoolSnap *snap =
-            (BManagerPoolSnap *)Stack_push(self->stack_pool, 1);
-        if (Stack_fresh(self->stack_pool))
-            snap->ub_pool = VEC_alloc(DIM_LAST);
-        VEC_copy(snap->ub_pool, self->ub_pool);
+    if (Stack_fresh(&self->stack)) {
+        snap->index        = XMALLOC(N_LAYERS_EXT * sizeof(uint16_t *));
+        snap->counter_self = XMALLOC(N_LAYERS_EXT * sizeof(uint16_t));
+        snap->counter_nbrs = XMALLOC(N_LAYERS_EXT * sizeof(uint16_t));
+
+        snap->lb      = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+        snap->ub      = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+        snap->lb_self = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+        snap->ub_self = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+        snap->lb_nbrs = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+        snap->ub_nbrs = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+        snap->lb_rxcA = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+        snap->ub_rxcA = XMALLOC(N_LAYERS_EXT * sizeof(MAT *));
+
+        ITER_LAYERS(l) {
+            snap->index[l]   = XMALLOC(N_VERTICES * sizeof(uint16_t));
+            snap->lb[l]      = MAT_alloc(N_VERTICES, DIM[l]);
+            snap->ub[l]      = MAT_alloc(N_VERTICES, DIM[l]);
+            snap->lb_nbrs[l] = MAT_alloc(N_VERTICES, DIM[l]);
+            snap->ub_nbrs[l] = MAT_alloc(N_VERTICES, DIM[l]);
+            snap->lb_self[l] = MAT_alloc(N_VERTICES, DIM[l]);
+            snap->ub_self[l] = MAT_alloc(N_VERTICES, DIM[l]);
+            snap->lb_rxcA[l] = MAT_alloc(N_VERTICES, DIM[l]);
+            snap->ub_rxcA[l] = MAT_alloc(N_VERTICES, DIM[l]);
+        }
+        snap->ub_pool = VEC_alloc(DIM_LAST);
     }
+
+    snap->ready = false;
+
+    self->snap = snap;
 }
 
 void BManager_pop(BManager *self) {
-    BManagerSnap *snap;
-    while ((snap = (BManagerSnap *)Stack_pop(self->stack)) != NULL) {
-        size_t l = snap->l;
-        size_t v = snap->v;
-        MV_SWAP(snap->lb_v, self->lb[l], v);
-        MV_SWAP(snap->ub_v, self->ub[l], v);
-        if (snap->push_self) {
-            MV_SWAP(snap->lb_self_v, self->lb_self[l], v);
-            MV_SWAP(snap->ub_self_v, self->ub_self[l], v);
-        }
-        if (snap->push_nbrs) {
-            MV_SWAP(snap->lb_nbrs_v, self->lb_nbrs[l], v);
-            MV_SWAP(snap->ub_nbrs_v, self->ub_nbrs[l], v);
-        }
-        if (NOT_LAST_LAYER(l)) {
-            MV_SWAP(snap->lb_rxcA_v, self->lb_rxcA[l + 1], v);
-            MV_SWAP(snap->ub_rxcA_v, self->ub_rxcA[l + 1], v);
-        }
-    }
-
-    if (IS_GRAPH_CLASS) {
-        BManagerPoolSnap *snap =
-            (BManagerPoolSnap *)Stack_pop(self->stack_pool);
-        VEC *tmp      = snap->ub_pool;
-        snap->ub_pool = self->ub_pool;
-        self->ub_pool = tmp;
-    }
+    BManager_pop_snap(self);
 }
 
 void BManager_flush(BManager *self) {
-    BManager_comp(self);
+    self->flush = true;
 }
 
 // ------------------------------------ sat ------------------------------------
 bool BManager_unsat(BManager *self) {
     PROFILING_START;
 
-    if (self->init)
-        self->init = false;
+    if (self->flush || !USE_INC_COMP) {
+        self->flush = false;
+        BManager_comp(self);
+    }
     else {
-        if (USE_INC_COMP)
-            BManager_update(self);
-        else
-            BManager_comp(self);
+        BManager_update(self);
     }
 
     bool ret = false;
     if (IS_NODE_CLASS)
-        ret = !VEC_any_pos(MSLICE(self->ub[N_LAYERS], 0));
-    if (IS_GRAPH_CLASS)
+        ret = !VEC_any_pos(self->ub[N_LAYERS][0]);
+    else {
+        assert(IS_GRAPH_CLASS);
         ret = !VEC_any_pos(self->ub_pool);
+    }
 
     PROFILING_END;
 

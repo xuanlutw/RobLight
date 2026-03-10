@@ -1,17 +1,18 @@
 #pragma once
 
-#include "utils.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "utils.h"
+
 // ----------------------------------- node ------------------------------------
 typedef struct Node Node;
 struct Node {
-    Node  *next_node;
-    size_t type;
+    Node *next_node;
+    bool  is_marker;
 };
 
 static inline Node *Node_push(Node *self, Node *node) {
@@ -23,74 +24,57 @@ static inline Node *Node_pop(Node *self) {
     return (self == NULL) ? NULL : self->next_node;
 }
 
-static inline Node *Node_top(Node *self) {
-    return self;
-}
-
-static inline void Node_free(Node *self, void (*free_hook)(Node *)) {
-    Node *node;
-    while ((node = Node_top(self)) != NULL) {
-        self = Node_pop(self);
-        if (free_hook == NULL)
-            free(node);
-        else
-            free_hook(node);
-    }
-}
-
 // ----------------------------------- stack -----------------------------------
 typedef struct {
     size_t size;
-    size_t n_types;
 
-    void (*free_hook)(Node *);
+    Node *nodes;
+    Node *free_nodes;
+    Node *free_markers;
 
-    Node  *nodes;
-    Node **free_nodes;
-    bool   fresh;
+    bool is_fresh;
 } Stack;
 
-static inline Stack *Stack_alloc(size_t size, size_t n_types,
-                                 void (*free_hook)(Node *)) {
+static inline void Stack_init(Stack *self, size_t size) {
     assert(size > sizeof(Node));
 
-    Stack *self      = XMALLOC(sizeof(Stack));
-    self->size       = size;
-    self->n_types    = n_types;
-    self->free_hook  = free_hook;
-    self->nodes      = NULL;
-    self->free_nodes = XMALLOC((n_types + 1) * sizeof(Node *));
-    for (size_t i = 0; i <= n_types; ++i)
-        self->free_nodes[i] = NULL;
-
-    return self;
+    self->size         = size;
+    self->nodes        = NULL;
+    self->free_nodes   = NULL;
+    self->free_markers = NULL;
 }
 
-static inline void Stack_free(Stack *self) {
-    Node_free(self->nodes, self->free_hook);
-
-    for (size_t i = 0; i <= self->n_types; ++i)
-        Node_free(self->free_nodes[i], self->free_hook);
-    free(self->free_nodes);
-
-    free(self);
+static inline void Stack_free_nodes(Stack *self __attribute__((unused)),
+                                    Node  *node, void (*free_hook)(Node *)) {
+    Node *node_top;
+    while ((node_top = node) != NULL) {
+        node = Node_pop(node_top);
+        if ((node_top->is_marker) || (free_hook == NULL))
+            free(node_top);
+        else
+            free_hook(node_top);
+    }
 }
 
-static inline Node *Stack_push(Stack *self, size_t type) {
-    assert(type <= self->n_types);
+static inline void Stack_cleanup(Stack *self, void (*free_hook)(Node *)) {
+    Stack_free_nodes(self, self->nodes, free_hook);
+    Stack_free_nodes(self, self->free_nodes, free_hook);
+    Stack_free_nodes(self, self->free_markers, free_hook);
+}
 
-    Node *node = Node_top(self->free_nodes[type]);
-
-    if (node == NULL) {
+static inline Node *Stack_push(Stack *self) {
+    Node *node;
+    if (self->free_nodes == NULL) {
         // create new node
-        node        = XMALLOC(self->size);
-        node->type  = type;
-        self->fresh = true;
+        node            = XMALLOC(self->size);
+        node->is_marker = false;
+        self->is_fresh  = true;
     }
     else {
         // pop node
-        self->free_nodes[type] = Node_pop(self->free_nodes[type]);
-        self->fresh            = false;
+        node             = self->free_nodes;
+        self->free_nodes = Node_pop(self->free_nodes);
+        self->is_fresh   = false;
     }
 
     self->nodes = Node_push(self->nodes, node);
@@ -99,20 +83,38 @@ static inline Node *Stack_push(Stack *self, size_t type) {
 }
 
 static inline void Stack_push_marker(Stack *self) {
-    Stack_push(self, 0);
+    Node *node;
+    if (self->free_markers == NULL) {
+        // create new node
+        node            = XMALLOC(sizeof(Node));
+        node->is_marker = true;
+    }
+    else {
+        // pop node
+        node               = self->free_markers;
+        self->free_markers = Node_pop(self->free_markers);
+    }
+
+    self->nodes = Node_push(self->nodes, node);
 }
 
 static inline bool Stack_fresh(Stack *self) {
-    return self->fresh;
+    return self->is_fresh;
 }
 
 static inline Node *Stack_pop(Stack *self) {
-    assert(self->nodes != NULL);
-
-    Node  *node            = Node_top(self->nodes);
-    size_t type            = node->type;
-    self->nodes            = Node_pop(self->nodes);
-    self->free_nodes[type] = Node_push(self->free_nodes[type], node);
-
-    return (type == 0) ? NULL : node;
+    Node *node = self->nodes;
+    if (node == NULL) {
+        return NULL;
+    }
+    else if (node->is_marker) {
+        self->nodes        = Node_pop(self->nodes);
+        self->free_markers = Node_push(self->free_markers, node);
+        return NULL;
+    }
+    else {
+        self->nodes      = Node_pop(self->nodes);
+        self->free_nodes = Node_push(self->free_nodes, node);
+        return node;
+    }
 }

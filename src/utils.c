@@ -16,16 +16,18 @@ static size_t median_of_three(double *a, size_t i, size_t j, size_t k) {
     if (a[i] < a[j]) {
         if (a[j] < a[k])
             return j;
-        if (a[i] < a[k])
+        else if (a[i] < a[k])
             return k;
-        return i;
+        else
+            return i;
     }
     else {
         if (a[i] < a[k])
             return i;
-        if (a[j] < a[k])
+        else if (a[j] < a[k])
             return k;
-        return j;
+        else
+            return j;
     }
 }
 

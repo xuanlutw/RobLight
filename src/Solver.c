@@ -7,74 +7,97 @@
 #include "BManager.h"
 #include "Common.h"
 #include "FManager.h"
-#include "PGraph.h"
+#include "GManager.h"
 #include "Solver.h"
 #include "utils.h"
 
 // ----------------------------------- type ------------------------------------
+typedef enum {
+    SAT,
+    UNSAT,
+    TIMEOUT
+} Status;
+
 struct Solver {
-    Common   *common;
-    PGraph   *G;
+    GManager *gm;
     FManager *fm;
     BManager *bm;
 
-    bool robust;
-    bool timeout;
+    Status status;
+    bool   comp_radius;
+    size_t radius;
+    size_t rem_budget;
 
     size_t num_nodes;
     size_t num_cuts;
     size_t num_leafs;
-
-    bool   sat;
-    bool   flush;
-    bool   comp_radius;
-    size_t radius;
 
     bool    set_timeout;
     clock_t clock_start;
     clock_t clock_end;
     clock_t clock_feat;
     clock_t clock_bound;
-    clock_t clock_pgraph;
+    clock_t clock_graph;
     clock_t clock_profiling;
 };
 
 // --------------------------------- lifecycle ---------------------------------
 Solver *Solver_alloc(const char *gnn_path, const char *graph_path,
-                     const char *feat_path, const char *pert, size_t variant) {
+                     const char *feat_path, const char *pert, size_t variant,
+                     bool comp_radius, size_t gbudget, size_t lbudget,
+                     size_t ori, size_t shift) {
     Solver *self = XMALLOC(sizeof(Solver));
 
-    self->common = Common_alloc(gnn_path, graph_path, feat_path, pert, variant);
-    self->G      = PGraph_alloc(self->common);
-    self->fm     = FManager_alloc(self->common, self->G);
-    self->bm     = BManager_alloc(self->common, self->G);
+    Common_init(gnn_path, graph_path, feat_path, pert, variant, ori, shift);
+
+    self->gm = GManager_alloc(comp_radius, gbudget, lbudget);
+    self->fm = FManager_alloc(self->gm);
+    self->bm = BManager_alloc(self->gm);
+
+    self->status      = UNSAT;
+    self->comp_radius = comp_radius;
+    self->radius      = N_EDGES;
+
+    self->num_nodes = 0;
+    self->num_cuts  = 0;
+    self->num_leafs = 0;
 
     return self;
 }
 
 void Solver_free(Solver *self) {
-    BManager_free(self->bm);
+    GManager_free(self->gm);
     FManager_free(self->fm);
-    PGraph_free(self->G);
-    Common_free(self->common);
+    BManager_free(self->bm);
+
+    Common_cleanup();
 
     free(self);
 }
 
 // -------------------------------- statistics ---------------------------------
 const char *Solver_result(Solver *self) {
-    return self->timeout ? "TIMEOUT" : (self->robust ? "ROBUST" : "NONROBUST");
+    switch (self->status) {
+    case SAT:
+        return "NONROBUST";
+    case UNSAT:
+        return "ROBUST";
+    case TIMEOUT:
+        return "TIMEOUT";
+    default:
+        CHECK(true, "never!");
+    }
 }
 
 size_t Solver_radius(Solver *self) {
     return self->radius;
 }
 
-size_t Solver_ori(Solver *self) {
+size_t Solver_ori(Solver *self __attribute__((unused))) {
     return ORI;
 }
 
-size_t Solver_tgt(Solver *self) {
+size_t Solver_tgt(Solver *self __attribute__((unused))) {
     return TGT;
 }
 
@@ -102,155 +125,195 @@ double Solver_ratio_bound(Solver *self) {
     return (double)(self->clock_bound) / self->clock_profiling;
 }
 
-double Solver_ratio_pgraph(Solver *self) {
-    return (double)(self->clock_pgraph) / self->clock_profiling;
+double Solver_ratio_graph(Solver *self) {
+    return (double)(self->clock_graph) / self->clock_profiling;
 }
 
-void Solver_dump_perturbation(Solver *self, FILE *fp) {
-    Common_dump_perturbation(self->common, fp);
+void Solver_write_perturbation(Solver *self __attribute__((unused)), FILE *fp) {
+    Common_write_perturbation(fp);
 }
 
-void Solver_dump_variant(Solver *self, FILE *fp) {
-    Common_dump_variant(self->common, fp);
+void Solver_write_variant(Solver *self __attribute__((unused)), FILE *fp) {
+    Common_write_variant(fp);
 }
 
 // -------------------------------- robustness ---------------------------------
-static void Solver_set_statistics(Solver *self) {
+static bool Solver_set_statistics(Solver *self) {
+    // set profiling
     bool profiling = (self->num_nodes % PROF_FREQ == 0);
-
-    PGraph_set_profiling(self->G, profiling);
+    GManager_set_profiling(self->gm, profiling);
     FManager_set_profiling(self->fm, profiling);
     BManager_set_profiling(self->bm, profiling);
 
+    // increase counter
     self->num_nodes++;
+
+    // check timeout
+    return (profiling && self->set_timeout && (clock() > self->clock_end));
 }
 
-static bool Solver_check_timeout(Solver *self) {
-    bool profiling = (self->num_nodes % PROF_FREQ == 0);
-
-    if (profiling && self->set_timeout && (clock() > self->clock_end))
-        self->timeout = true;
-
-    return self->timeout;
-}
-
-static void Solver_push(Solver *self, Edge_type edge_type, size_t v, size_t u,
-                        Op_type op_type) {
-    PGraph_push(self->G, edge_type, v, u, op_type);
-    FManager_push(self->fm);
-    BManager_push(self->bm);
+static void Solver_push(Solver *self, edge_t edge, size_t v, size_t u,
+                        op_t op) {
+    GManager_push(self->gm, edge, v, u, op);
+    if (USE_INC_COMP) {
+        FManager_push(self->fm);
+        BManager_push(self->bm);
+    }
 }
 
 static void Solver_pop(Solver *self) {
-    PGraph_pop(self->G);
-    FManager_pop(self->fm);
-    BManager_pop(self->bm);
+    GManager_pop(self->gm);
+    if (USE_INC_COMP) {
+        FManager_pop(self->fm);
+        BManager_pop(self->bm);
+    }
 }
 
-static void Solver_sat(Solver *self) {
-    if (Solver_check_timeout(self))
-        return;
+#ifndef NDEBUG
+#define INDENT(depth)                        \
+    do {                                     \
+        for (size_t i = 0; i < (depth); ++i) \
+             printf("   ");                  \
+    } while(0)
 
-    Solver_set_statistics(self);
+#define LOG(depth, msg, ...)             \
+    do {                                 \
+        INDENT(depth);                   \
+        printf(msg "\n", ##__VA_ARGS__); \
+    } while(0)
+#else
+#define LOG(depth, msg, ...) (void)0
+#endif
+
+static Status Solver_sat(Solver *self, size_t depth) {
+#ifndef NDEBUG
+    // GManager_dump(self->gm);
+#endif
+    LOG(depth, "=> iter %ld (%ld)", self->num_nodes,
+        GManager_gbudget(self->gm));
+
+    // set statistics and check timeout
+    if (Solver_set_statistics(self)) {
+        LOG(depth, " > STATUS: timeout");
+        return TIMEOUT;
+    }
+
+    // update nbrs in the grounding graph for non-robust tester and edge picker
+    if (IS_NODE_CLASS && (USE_HEURISTIC_PICK || USE_INC_COMP))
+        GManager_update_ginbr(self->gm);
 
     // check non-robust tester
     if (FManager_sat(self->fm)) {
-        self->sat = true;
-        if (self->comp_radius) {  // set current budget to 0 and continue
-            self->flush = true;
-            self->radius -= PGraph_budget_down(self->G);
-        }
-        return;
+        LOG(depth, " > STATUS: find counter example");
+        self->rem_budget = GManager_gbudget(self->gm);
+        return SAT;
     }
 
-    // return if it is a leaf node
-    if ((PGraph_gbudget(self->G) == 0) || !PGraph_pick_next_edge(self->G)) {
+    // return if there is no budget
+    if (GManager_gbudget(self->gm) == 0) {
+        LOG(depth, " > STATUS: leaf node (no budget)");
         self->num_leafs++;
         self->num_cuts++;
-        return;
+        return UNSAT;
     }
+
+    // return if there is no next edge
+    edge_t edge;
+    size_t v, u;
+    if (!GManager_pick_next_edge(self->gm, &edge, &v, &u)) {
+        LOG(depth, " > STATUS: leaf node (no next edge)");
+        self->num_leafs++;
+        self->num_cuts++;
+        return UNSAT;
+    }
+
+    // update nbrs in the adjusted graph for bound propagator
+    if (IS_NODE_CLASS && USE_INC_COMP)
+        GManager_update_ainbr(self->gm);
 
     // check bound propagator
     if (BManager_unsat(self->bm)) {
+        LOG(depth, " > STATUS: bound confilct");
         self->num_cuts++;
-        return;
+        return UNSAT;
     }
-
-    // keep next edge in stack
-    Edge_type edge_type = PGraph_edge_type(self->G);
-    size_t    v         = PGraph_v(self->G);
-    size_t    u         = PGraph_u(self->G);
-    Op_type   op_type;
-    bool      flush = false;
 
     // split
-    op_type = (edge_type == PEDGE) ? CUT : CON;
-    Solver_push(self, edge_type, v, u, op_type);
-    Solver_sat(self);
-    Solver_pop(self);
-    // explore the other branch if we need to compute the radius
-    if (!self->comp_radius && self->sat)
-        return;
-    if (self->comp_radius && self->flush) {
-        BManager_flush(self->bm);  // flush for the other branch
-        flush = true;
-    }
+    op_t op = (edge == PEDGE) ? CUT : CON;
+    LOG(depth, " > STATUS: %s pedge (%ld, %ld)", stringize_op(op), v, u);
 
-    op_type = (edge_type == PEDGE) ? CON : CUT;
-    Solver_push(self, edge_type, v, u, op_type);
-    Solver_sat(self);
+    Solver_push(self, edge, v, u, op);
+    Status ret = Solver_sat(self, depth + 1);
     Solver_pop(self);
-    if (!self->comp_radius && self->sat)
-        return;
-    if (self->comp_radius && self->flush)
-        flush = true;
+    if (ret == TIMEOUT)
+        return TIMEOUT;
+    else if (ret == SAT)
+        return SAT;
 
-    // pass flush to parent
-    self->flush = flush;
+    op = (edge == PEDGE) ? CON : CUT;
+    LOG(depth, " > STATUS: %s pedge (%ld, %ld)", stringize_op(op), v, u);
+
+    Solver_push(self, edge, v, u, op);
+    ret = Solver_sat(self, depth + 1);
+    Solver_pop(self);
+    if (ret == TIMEOUT)
+        return TIMEOUT;
+    else if (ret == SAT)
+        return SAT;
+
+    return UNSAT;
 }
 
-void Solver_check_robust(Solver *self, bool comp_radius, size_t gbudget,
-                         size_t lbudget, size_t ori, size_t shift,
-                         double timeout) {
-    // initialize
-    self->num_nodes   = 0;
-    self->num_cuts    = 0;
-    self->num_leafs   = 0;
-    self->timeout     = false;
-    self->sat         = false;
-    self->flush       = false;
-    self->comp_radius = comp_radius;
-
-    // prepare computation of radius
-    if (comp_radius) {
-        self->radius = N_EDGES;
-        gbudget      = N_EDGES;
-        lbudget      = N_EDGES;
-    }
+void Solver_check_robust(Solver *self, double timeout) {
+#ifndef NDEBUG
+    // Common_dump();
+#endif
 
     // clock start
     self->set_timeout = (timeout > 0);
     self->clock_start = clock();
     self->clock_end   = self->clock_start + timeout * CLOCKS_PER_SEC;
 
-    // initialize components
-    Common_init(self->common, ori, shift);
-    PGraph_init(self->G, gbudget, lbudget);
-    FManager_init(self->fm);
-    BManager_init(self->bm);
-
     // check robustness
-    Solver_sat(self);
+    if (self->comp_radius) {
+        Status status_all = UNSAT;
+        while (true) {
+            Status status = Solver_sat(self, 0);
+
+            if (status == TIMEOUT) {
+                status_all = TIMEOUT;
+                break;
+            }
+            else if (status == UNSAT) {
+                break;
+            }
+            else {
+                status_all = SAT;
+
+                if (self->rem_budget == self->radius) {
+                    self->radius = 0;
+                    break;
+                }
+                else {
+                    self->radius -= (self->rem_budget + 1);
+                    GManager_budget_down(self->gm, self->rem_budget + 1);
+                }
+            }
+        }
+        self->radius = (status_all == SAT) ? self->radius : 0;
+        self->status = status_all;
+    }
+    else {
+        self->status = Solver_sat(self, 0);
+    }
 
     // clock end
     self->clock_end = clock();
 
     // store results
-    self->robust       = !self->sat;
-    self->radius       = (self->timeout || self->robust) ? 0 : self->radius - 1;
-    self->clock_feat   = FManager_clock(self->fm);
-    self->clock_bound  = BManager_clock(self->bm);
-    self->clock_pgraph = PGraph_clock(self->G);
+    self->clock_feat  = FManager_clock(self->fm);
+    self->clock_bound = BManager_clock(self->bm);
+    self->clock_graph = GManager_clock(self->gm);
     self->clock_profiling =
-        self->clock_feat + self->clock_bound + self->clock_pgraph;
+        self->clock_feat + self->clock_bound + self->clock_graph;
 }

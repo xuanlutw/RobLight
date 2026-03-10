@@ -11,175 +11,177 @@
 typedef enum {
     CLASS_NODE,
     CLASS_GRAPH
-} Class_type;
+} class_t;
 
 typedef enum {
     AGGR_SUM,
     AGGR_MAX,
     AGGR_MEAN
-} Aggr_type;
+} aggr_t;
 
 typedef enum {
     GRAPH_DIRECTED,
     GRAPH_UNDIRECTED
-} Graph_type;
+} graph_t;
 
 typedef enum {
     PERT_DEL_ONLY,
     PERT_DEL_INS
-} Pert_type;
+} pert_t;
 
 typedef enum {
     PEDGE,
-    QEDGE
-} Edge_type;
+    NEDGE,
+    QEDGE,
+    XEDGE
+} edge_t;
 
 typedef enum {
     CUT,
     CON
-} Op_type;
+} op_t;
 
-typedef struct Graph  Graph;
-typedef struct Common Common;
+static inline const char *stringize_op(op_t op) {
+    return (op == CUT) ? "CUT" : "CON";
+}
 
-struct Common {
-    Common *common;
+// -----------------------------------------------------------------------------
+typedef struct HGraph HGraph;
 
+typedef struct {
     // GNN
-    Class_type class;
-    Aggr_type aggr;
+    class_t class;
+    aggr_t aggr;
 
     size_t  n_layers;
     size_t *dim;
-    size_t  dimL;
+    size_t  dim_max;
 
-    MAT **cC;
-    MAT **cA;
-    VEC **cb;
+    MAT *cC;
+    MAT *cA;
+    VEC *cb;
 
-    MAT *cAL;
-    VEC *cbL;
-
-    MAT **cC_abs;
-    MAT **cA_abs;
+    MAT cAP;
+    VEC cbP;
 
     size_t ori;
     size_t tgt;
 
-    // Graph
-    size_t     n_vertices;
-    size_t     n_edges;
-    Graph_type directed;
+    // graph
+    size_t  n_vertices;
+    size_t  n_edges;
+    graph_t directed;
 
-    Graph *G;
+    HGraph *input_graph;
 
-    MAT *input_feat;
-    MAT *input_feat_rxcA;
-    MAT *input_feat_rxcC_cb;
+    // feature
+    MAT input_feat;
+    MAT input_feat_rxcA;
+    MAT input_feat_rxcC_cb;
 
-    // Perturbation
-    Pert_type pert;
+    // perturbation
+    pert_t pert;
 
-    // Options
+    // options
     bool inc_comp;
     bool reorder_comp;
     bool tight_bound;
     bool heuristic_pick;
-};
+} Common;
 
-// --------------------------------- lifecycle ---------------------------------
-Common *Common_alloc(const char *gnn_path, const char *graph_path,
-                     const char *feat_path, const char *pert, size_t variant);
-void Common_free(Common *self);
-void Common_dump(Common *self);
+extern Common common;
 
 // --------------------------------- iterator ----------------------------------
 // GNN
 #define ITER_LAYERS(l) \
-    for (size_t l = 1; l <= self->common->n_layers; ++l)
+    for (size_t l = 1; l <= common.n_layers; ++l)
 
 #define ITER_LAYERS_EXT(l) \
-    for (size_t l = 0; l <= self->common->n_layers; ++l)
+    for (size_t l = 0; l <= common.n_layers; ++l)
 
 #define IS_LAST_LAYER(l) \
-    ((l) == self->common->n_layers)
+    ((l) == common.n_layers)
 
 #define NOT_LAST_LAYER(l) \
-    ((l) < self->common->n_layers)
+    ((l) < common.n_layers)
 
 #define IS_NODE_CLASS \
-    (self->common->class == CLASS_NODE)
+    (common.class == CLASS_NODE)
 
 #define IS_GRAPH_CLASS \
-    (self->common->class == CLASS_GRAPH)
+    (common.class == CLASS_GRAPH)
 
 #define IS_SUM_GNN \
-    (self->common->aggr == AGGR_SUM)
+    (common.aggr == AGGR_SUM)
 
 #define IS_MAX_GNN \
-    (self->common->aggr == AGGR_MAX)
+    (common.aggr == AGGR_MAX)
 
 #define IS_MEAN_GNN \
-    (self->common->aggr == AGGR_MEAN)
+    (common.aggr == AGGR_MEAN)
 
-// Graph
+// graph
 #define ITER_VTXS(v) \
-    for (size_t v = 0; v < self->common->n_vertices; ++v)
+    for (size_t v = 0; v < common.n_vertices; ++v)
 
 #define IS_DIRECTED \
-    (self->common->directed == GRAPH_DIRECTED)
+    (common.directed == GRAPH_DIRECTED)
 
 #define IS_UNDIRECTED \
-    (self->common->directed == GRAPH_UNDIRECTED)
+    (common.directed == GRAPH_UNDIRECTED)
 
-// Perturbation
+// perturbation
 #define IS_DEL_ONLY \
-    (self->common->pert == PERT_DEL_ONLY)
+    (common.pert == PERT_DEL_ONLY)
 
 #define IS_DEL_INS \
-    (self->common->pert == PERT_DEL_INS)
+    (common.pert == PERT_DEL_INS)
 
-// Options
+// options
 #define USE_INC_COMP \
-    (self->common->inc_comp == true)
+    (common.inc_comp == true)
 
 #define USE_REORDER_COMP \
-    (self->common->reorder_comp == true)
+    (common.reorder_comp == true)
 
 #define USE_TIGHT_BOUND \
-    (self->common->tight_bound == true)
+    (common.tight_bound == true)
 
 #define USE_HEURISTIC_PICK \
-    (self->common->heuristic_pick == true)
+    (common.heuristic_pick == true)
 
 // ---------------------------------- getter -----------------------------------
 // GNN
-#define N_LAYERS     (self->common->n_layers)
-#define N_LAYERS_EXT (self->common->n_layers + 1)
-#define DIM          (self->common->dim)
-#define DIM_LAST     (self->common->dim[N_LAYERS])
-#define DIML         (self->common->dimL)
-#define CC           (self->common->cC)
-#define CC_ABS       (self->common->cC_abs)
-#define CA           (self->common->cA)
-#define CA_ABS       (self->common->cA_abs)
-#define CB           (self->common->cb)
-#define CAL          (self->common->cAL)
-#define CBL          (self->common->cbL)
-#define ORI          (self->common->ori)
-#define TGT          (self->common->tgt)
+#define N_LAYERS     (common.n_layers)
+#define N_LAYERS_EXT (common.n_layers + 1)
+#define DIM          (common.dim)
+#define DIM_LAST     (common.dim[N_LAYERS])
+#define DIM_MAX      (common.dim_max)
+#define CC           (common.cC)
+#define CA           (common.cA)
+#define CB           (common.cb)
+#define CAP          (common.cAP)
+#define CBP          (common.cbP)
+#define ORI          (common.ori)
+#define TGT          (common.tgt)
 
-// Graph
-#define N_VERTICES         (self->common->n_vertices)
-#define N_EDGES            (self->common->n_edges)
-#define INPUT_G            (self->common->G)
-#define INPUT_FEAT         (self->common->input_feat)
-#define INPUT_FEAT_RXCA    (self->common->input_feat_rxcA)
-#define INPUT_FEAT_RXCC_CB (self->common->input_feat_rxcC_cb)
+// graph
+#define N_VERTICES  (common.n_vertices)
+#define N_EDGES     (common.n_edges)
+#define INPUT_GRAPH (common.input_graph)
+
+// feature
+#define INPUT_FEAT         (common.input_feat)
+#define INPUT_FEAT_RXCA    (common.input_feat_rxcA)
+#define INPUT_FEAT_RXCC_CB (common.input_feat_rxcC_cb)
+
+// --------------------------------- lifecycle ---------------------------------
+void Common_init(const char *gnn_path, const char *graph_path,
+                 const char *feat_path, const char *pert, size_t variant,
+                 size_t ori, size_t shift);
+void Common_cleanup();
+void Common_dump();
 
 // ----------------------------------- info ------------------------------------
-void Common_dump_perturbation(Common *self, FILE *fp);
-void Common_dump_variant(Common *self, FILE *fp);
-
-// ---------------------------------- status -----------------------------------
-void Common_init(Common *self, size_t ori, size_t shift);
+void Common_write_perturbation(FILE *fp);
+void Common_write_variant(FILE *fp);

@@ -22,18 +22,17 @@ int main(int argc, char *argv[]) {
     size_t      shift       = atoi(argv[11]);
     double      timeout     = atof(argv[12]);
 
-    // check robustness
+    // initialize
     Solver *solver =
-        Solver_alloc(gnn_path, graph_path, feat_path, pert, variant);
-    Solver_check_robust(solver, comp_radius, gbudget, lbudget, ori, shift,
-                        timeout);
+        Solver_alloc(gnn_path, graph_path, feat_path, pert, variant,
+                     comp_radius, gbudget, lbudget, ori, shift);
+
+    // check robustness
+    Solver_check_robust(solver, timeout);
 
     // write results
-    FILE *fp;
-    if (strcmp(output_path, "") == 0)
-        fp = stdout;
-    else
-        fp = XFOPEN(output_path, "w");
+    FILE *fp =
+        (strcmp(output_path, "") == 0) ? stdout : XFOPEN(output_path, "w");
     fprintf(fp, "========== configuration ==========\n");
     fprintf(fp, "gnn_path:      %s\n", gnn_path);
     fprintf(fp, "graph_path:    %s\n", graph_path);
@@ -48,9 +47,9 @@ int main(int argc, char *argv[]) {
     else
         fprintf(fp, "%ld\n", Solver_tgt(solver));
     fprintf(fp, "perturbation:  ");
-    Solver_dump_perturbation(solver, fp);
+    Solver_write_perturbation(solver, fp);
     fprintf(fp, "variant:       ");
-    Solver_dump_variant(solver, fp);
+    Solver_write_variant(solver, fp);
 
     fprintf(fp, "============== status =============\n");
     fprintf(fp, "result: %s\n", Solver_result(solver));
@@ -59,7 +58,7 @@ int main(int argc, char *argv[]) {
     fprintf(fp, "#cuts:  %ld\n", Solver_num_cuts(solver));
     fprintf(fp, "#leafs: %ld\n", Solver_num_leafs(solver));
     fprintf(fp, "ratio:  %.2lf:%.2lf:%.2lf\n", Solver_ratio_feat(solver),
-            Solver_ratio_bound(solver), Solver_ratio_pgraph(solver));
+            Solver_ratio_bound(solver), Solver_ratio_graph(solver));
     if (comp_radius)
         fprintf(fp, "radius: %ld\n", Solver_radius(solver));
 
@@ -67,5 +66,6 @@ int main(int argc, char *argv[]) {
     if (fp != stdout)
         fclose(fp);
     Solver_free(solver);
+
     return 0;
 }

@@ -52,7 +52,7 @@ def run_exp3(do_subset=False):
                          num_instance(dataset), "DEL_ONLY", 0,
                          True, 0, 0,
                          -1, 0,
-                         300, num_workers)
+                         600, num_workers)
 
 def run_exp4(do_subset=False):
     for dataset in get_graph_datesets(do_subset):
@@ -64,7 +64,7 @@ def run_exp4(do_subset=False):
                          num_instance(dataset), "DEL_INS", 0,
                          False, ng, nl,
                          -1, 1,
-                         300, num_workers)
+                         600, num_workers)
             print("", flush=True)
     for aggr in get_aggrs():
         for dataset in get_graph_datesets(do_subset):
@@ -75,7 +75,7 @@ def run_exp4(do_subset=False):
                              num_instance(dataset), "DEL_INS", 0,
                              False, ng, nl,
                              -1, 0,
-                             300, num_workers)
+                             600, num_workers)
                 print("", flush=True)
 
 if __name__ == "__main__":

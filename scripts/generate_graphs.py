@@ -8,13 +8,13 @@ graph_base = "./data/graph"
 
 def do_node_dataset(dataset_name, r):
     if dataset_name in ["Cora", "CiteSeer"]:
-        dataset = AttributedGraphDataset(root='/tmp/dataset', name=dataset_name)
+        dataset = AttributedGraphDataset(root='./data/dataset', name=dataset_name)
         directed = "DIRECTED"
     elif dataset_name in ['Cornell', 'Texas', 'Wisconsin']:
-        dataset = WebKB(root='/tmp/dataset', name=dataset_name)
+        dataset = WebKB(root='./data/dataset', name=dataset_name)
         directed = "DIRECTED"
     else:
-        ValueError("Unknown dataset")
+        raise ValueError("Unknown dataset")
     data = dataset[0]
     G    = to_networkx(data)
     G    = G.reverse(copy=True)
@@ -51,10 +51,10 @@ def do_node_dataset(dataset_name, r):
 
 def do_graph_dataset(dataset_name):
     if dataset_name in ["MUTAG", "ENZYMES"]:
-        data = TUDataset(root='../data/dataset', name=dataset_name)
+        data = TUDataset(root='./data/dataset', name=dataset_name)
         directed = "UNDIRECTED"
     else:
-        ValueError("Unknown dataset")
+        raise ValueError("Unknown dataset")
 
     graph_path = os.path.join(graph_base, f"{dataset_name}")
     os.makedirs(graph_path, exist_ok=True)

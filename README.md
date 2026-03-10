@@ -20,8 +20,8 @@ This will generate the executable file `roblight`.
 3. `<feat_path>` -- Path to the input graph feature file.
 4. `<output_path>` -- File path where **RobLight** will save verification results. If set to empty (`""`), then **RobLight** will print the results to the terminal.
 5. `<perturbation>` -- Type of perturbation to verify against:
-    + `0` -- deletion only.
-    + `1` -- deletion and insertion.
+    + `DEL_ONLY` -- deletion only.
+    + `DEL_INS` -- deletion and insertion.
 6. `<variant>` -- Variant of optimization strategies to use. This is a bitmask that combines the following options:
     + `1` -- disable incremental computation.
     + `2` -- disable reorder computation.
@@ -62,9 +62,9 @@ options:
                         0..(index-1). Default: 0.
   --comp-radius         Enable radius computation. If set, global/local
                         budgets are ignored.
-  --gbudget GBUDGET     Global budget (ignored if --compute-radius is set).
+  --gbudget GBUDGET     Global budget (ignored if --comp-radius is set).
                         Default: 1.
-  --lbudget LBUDGET     Local budget (ignored if --compute-radius is set).
+  --lbudget LBUDGET     Local budget (ignored if --comp-radius is set).
                         Default: same as global budget.
   --ori ORI             Original class. -1 indicates predicted class. Default:
                         predicted class.
