@@ -1,5 +1,17 @@
 # RobLight
-Artifact evaluation information for the paper **Robustness Verification of Graph Neural Networks Via Lightweight Satisfiability Testing**.
+Artifact for the paper **Robustness Verification of Graph Neural Networks Via Lightweight Satisfiability Testing** by Chia-Hsuan Lu, Tony Tan, and Michael Benedikt, published at Tools and Algorithms for the Construction and Analysis of Systems (TACAS 2026), Turin, Italy.
+
+```bibtex
+@inproceedings{roblight2026,
+    title  = {Robustness Verification of Graph Neural Networks Via Lightweight Satisfiability Testing},
+    author = {Lu, Chia-Hsuan and 
+              Tan, Tony and
+              Benedikt, Michael},
+    booktitle = {Tools and Algorithms for the Construction and Analysis of Systems},
+    year = {2026},
+    doi = {10.1007/978-3-032-22752-2_1}
+}
+```
 
 ## Build
 To build our tool **RobLight**, run:
